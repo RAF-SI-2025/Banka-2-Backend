@@ -3,10 +3,7 @@ package rs.raf.banka2_bek.auth.service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import rs.raf.banka2_bek.auth.dto.AuthResponseDto;
-import rs.raf.banka2_bek.auth.dto.LoginRequestDto;
-import rs.raf.banka2_bek.auth.dto.PasswordResetRequestDto;
-import rs.raf.banka2_bek.auth.dto.RegisterRequestDto;
+import rs.raf.banka2_bek.auth.dto.*;
 import rs.raf.banka2_bek.auth.model.PasswordResetRequestedEvent;
 import rs.raf.banka2_bek.auth.model.PasswordResetToken;
 import rs.raf.banka2_bek.auth.model.User;
@@ -14,6 +11,7 @@ import rs.raf.banka2_bek.auth.repository.PasswordResetTokenRepository;
 import rs.raf.banka2_bek.auth.repository.UserRepository;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -95,5 +93,41 @@ public class AuthService {
         );
 
         return "Password reset token generated and email event emitted";
+    }
+
+    public String resetPassword(PasswordResetDto reset){
+
+        PasswordResetToken passwordResetToken = passwordResetTokenRepository.findByToken(reset.getToken())
+                .orElseThrow(() -> new RuntimeException("Reset token does not exist"));
+
+
+        if(passwordResetToken.getExpiresAt().isBefore(LocalDateTime.now())) return "Reset token has expired";
+
+        if(passwordResetToken.getUsed()) return "Reset token has been already used";
+
+        User user = passwordResetToken.getUser();
+        String hashedNewPassword = passwordEncoder.encode(reset.getNewPassword());
+        user.setPassword(hashedNewPassword);
+        userRepository.save(user);
+        passwordResetToken.setUsed(true);
+        passwordResetTokenRepository.save(passwordResetToken);
+        return "Password reset successfully!";
+
+    }
+
+    public RefreshTokenResponseDto  refreshToken(RefreshTokenRequestDto  request){
+        String refreshToken = request.getRefreshToken();
+
+        if (!jwtService.isRefreshToken(refreshToken))
+            throw new RuntimeException("Invalid refresh token");
+
+        String email = jwtService.extractEmail(refreshToken);
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String newAccessToken = jwtService.generateAccessToken(user);
+
+        return new RefreshTokenResponseDto(newAccessToken, refreshToken);
     }
 }
