@@ -7,17 +7,17 @@ import rs.raf.banka2_bek.employee.model.ActivationToken;
 import rs.raf.banka2_bek.employee.model.Employee;
 import rs.raf.banka2_bek.employee.repository.ActivationTokenRepository;
 import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
-import rs.raf.banka2_bek.employee.service.AuthService;
+import rs.raf.banka2_bek.employee.service.EmployeeAuthService;
 
 import java.time.LocalDateTime;
 
 /**
- * Implementation of {@link AuthService}.
+ * Implementation of {@link EmployeeAuthService}.
  * Authors: Aleksa Vucinic (avucinic6020rn@raf.rs), Petar Poznanovic (ppoznanovic4917rn@raf.rs)
  */
 @Service
 @RequiredArgsConstructor
-public class AuthServiceImpl implements AuthService {
+public class EmployeeAuthServiceImpl implements EmployeeAuthService {
 
     private final ActivationTokenRepository activationTokenRepository;
     private final EmployeeRepository employeeRepository;

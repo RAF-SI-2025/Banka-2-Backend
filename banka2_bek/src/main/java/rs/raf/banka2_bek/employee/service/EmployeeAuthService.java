@@ -3,7 +3,7 @@ package rs.raf.banka2_bek.employee.service;
 /**
  * Service for authentication and account activation.
  */
-public interface AuthService {
+public interface EmployeeAuthService {
 
     /**
      * Activates an employee account using the one-time token sent by email.

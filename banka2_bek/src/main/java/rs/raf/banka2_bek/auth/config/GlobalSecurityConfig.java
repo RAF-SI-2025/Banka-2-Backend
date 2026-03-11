@@ -34,6 +34,7 @@ public class GlobalSecurityConfig  {
                                 "/auth/password_reset/request",
                                 "/auth/password_reset/confirm",
                                 "/auth/refresh",
+                                "/auth-employee/activate",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",

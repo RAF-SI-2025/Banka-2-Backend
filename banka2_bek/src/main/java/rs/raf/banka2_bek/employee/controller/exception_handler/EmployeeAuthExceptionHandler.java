@@ -5,15 +5,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import rs.raf.banka2_bek.employee.controller.AuthController;
+import rs.raf.banka2_bek.employee.controller.EmployeeAuthController;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-@RestControllerAdvice(assignableTypes = AuthController.class)
-public class AuthExceptionHandler {
+@RestControllerAdvice(assignableTypes = EmployeeAuthController.class)
+public class EmployeeAuthExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
