@@ -17,6 +17,12 @@ services:
       timeout: 5s
       retries: 5
 
+  adminer:
+    image: adminer
+    container_name: banka2_adminer
+    ports:
+      - "9001:8080"
+
   # Spring Boot backend
   backend:
     build: ./banka2_bek
