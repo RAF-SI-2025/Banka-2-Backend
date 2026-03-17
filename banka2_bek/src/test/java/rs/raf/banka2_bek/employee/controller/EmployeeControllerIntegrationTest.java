@@ -5,12 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.web.client.DefaultResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 import rs.raf.banka2_bek.auth.model.User;
 import rs.raf.banka2_bek.auth.repository.PasswordResetTokenRepository;
@@ -51,6 +48,12 @@ class EmployeeControllerIntegrationTest {
 
     @BeforeEach
     void cleanDatabase() {
+        restTemplate.setErrorHandler(new DefaultResponseErrorHandler() {
+            @Override
+            public boolean hasError(HttpStatusCode statusCode) {
+                return false;
+            }
+        });
         passwordResetTokenRepository.deleteAll();
         activationTokenRepository.deleteAll();
         employeeRepository.deleteAll();
