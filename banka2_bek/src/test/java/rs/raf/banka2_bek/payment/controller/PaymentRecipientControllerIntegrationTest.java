@@ -119,7 +119,8 @@ class PaymentRecipientControllerIntegrationTest {
         );
 
         assertThat(response.getStatusCode()).isEqualTo(OK);
-        assertThat(response.getBody()).isEqualTo("[]");
+        assertThat(response.getBody()).contains("\"content\":[]");
+        assertThat(response.getBody()).contains("\"totalElements\":0");
     }
 
     @Test
@@ -219,7 +220,8 @@ class PaymentRecipientControllerIntegrationTest {
                 new HttpEntity<>(headers),
                 String.class
         );
-        assertThat(getResponse.getBody()).isEqualTo("[]");
+        assertThat(getResponse.getBody()).contains("\"content\":[]");
+        assertThat(getResponse.getBody()).contains("\"totalElements\":0");
     }
 
     @Test

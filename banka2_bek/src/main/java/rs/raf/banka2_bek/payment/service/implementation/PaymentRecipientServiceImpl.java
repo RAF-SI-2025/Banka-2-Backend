@@ -1,6 +1,9 @@
 package rs.raf.banka2_bek.payment.service.implementation;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.client.model.Client;
@@ -12,9 +15,6 @@ import rs.raf.banka2_bek.payment.model.PaymentRecipient;
 import rs.raf.banka2_bek.payment.repository.PaymentRecipientRepository;
 import rs.raf.banka2_bek.payment.service.PaymentRecipientService;
 
-import java.util.List;
-import java.util.stream.Collectors;
-
 @Service
 @RequiredArgsConstructor
 public class PaymentRecipientServiceImpl implements PaymentRecipientService {
@@ -23,12 +23,11 @@ public class PaymentRecipientServiceImpl implements PaymentRecipientService {
     private final ClientRepository clientRepository;
 
     @Override
-    public List<PaymentRecipientResponseDto> getPaymentRecipients(String clientEmail) {
+    public Page<PaymentRecipientResponseDto> getPaymentRecipients(String clientEmail, int page, int limit) {
         Client client = getClientByEmail(clientEmail);
-        return paymentRecipientRepository.findByClientOrderByCreatedAtDesc(client)
-                .stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        Pageable pageable = PageRequest.of(page, limit);
+        return paymentRecipientRepository.findByClientOrderByCreatedAtDesc(client, pageable)
+                .map(this::toResponse);
     }
 
     @Override

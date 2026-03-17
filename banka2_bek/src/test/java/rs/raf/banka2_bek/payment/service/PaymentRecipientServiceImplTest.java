@@ -7,6 +7,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.payment.dto.CreatePaymentRecipientRequestDto;
@@ -21,6 +24,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,6 +32,7 @@ import static org.mockito.Mockito.when;
 class PaymentRecipientServiceImplTest {
 
     private static final String CLIENT_EMAIL = "client@test.com";
+    private static final long EXISTING_RECIPIENT_ID = 10L;
 
     @Mock
     private PaymentRecipientRepository paymentRecipientRepository;
@@ -51,7 +56,7 @@ class PaymentRecipientServiceImplTest {
                 .lastName("Client")
                 .build();
         existingRecipient = PaymentRecipient.builder()
-                .id(10L)
+                .id(EXISTING_RECIPIENT_ID)
                 .client(client)
                 .name("Existing Recipient")
                 .accountNumber("123456789012345678")
@@ -63,25 +68,27 @@ class PaymentRecipientServiceImplTest {
 
     @Test
     void getPaymentRecipients_returnsListForClient() {
+        Pageable pageable = PageRequest.of(0, 10);
         when(clientRepository.findByEmail(CLIENT_EMAIL)).thenReturn(Optional.of(client));
-        when(paymentRecipientRepository.findByClientOrderByCreatedAtDesc(client))
-                .thenReturn(List.of(existingRecipient));
+        when(paymentRecipientRepository.findByClientOrderByCreatedAtDesc(eq(client), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(existingRecipient), pageable, 1));
 
-        List<PaymentRecipientResponseDto> result = paymentRecipientService.getPaymentRecipients(CLIENT_EMAIL);
+        var result = paymentRecipientService.getPaymentRecipients(CLIENT_EMAIL, 0, 10);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getId()).isEqualTo(10L);
-        assertThat(result.get(0).getName()).isEqualTo("Existing Recipient");
-        assertThat(result.get(0).getAccountNumber()).isEqualTo("123456789012345678");
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent().get(0).getId()).isEqualTo(EXISTING_RECIPIENT_ID);
+        assertThat(result.getContent().get(0).getName()).isEqualTo("Existing Recipient");
+        assertThat(result.getContent().get(0).getAccountNumber()).isEqualTo("123456789012345678");
         verify(clientRepository).findByEmail(CLIENT_EMAIL);
-        verify(paymentRecipientRepository).findByClientOrderByCreatedAtDesc(client);
+        verify(paymentRecipientRepository).findByClientOrderByCreatedAtDesc(eq(client), any(Pageable.class));
     }
 
     @Test
     void getPaymentRecipients_throwsWhenClientNotFound() {
         when(clientRepository.findByEmail(CLIENT_EMAIL)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> paymentRecipientService.getPaymentRecipients(CLIENT_EMAIL))
+        assertThatThrownBy(() -> paymentRecipientService.getPaymentRecipients(CLIENT_EMAIL, 0, 10))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Client not found");
     }
