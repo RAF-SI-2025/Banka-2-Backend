@@ -174,3 +174,148 @@ WHERE e.email = 'vuk.obradovic@banka.rs'
 AND NOT EXISTS (
   SELECT 1 FROM employee_permissions ep WHERE ep.employee_id = e.id AND ep.permission = p.permission
 );
+
+
+-- ============================================================
+-- CLIENTS (klijenti banke — vlasnici racuna)
+-- ============================================================
+-- Email adrese se MORAJU poklapati sa users tabelom (role='CLIENT')
+-- jer AccountServiceImpl trazi klijenta po email-u iz JWT tokena.
+-- Lozinke: Klijent12345
+
+INSERT INTO clients (first_name, last_name, date_of_birth, gender, email, phone, address,
+                     password, salt_password, active, created_at)
+VALUES
+    ('Stefan', 'Jovanović', '1995-04-12', 'M', 'stefan.jovanovic@gmail.com',
+     '+381 65 333 4455', 'Cara Dušana 8, Niš',
+     '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+     'c2VlZF9jbGllbnRfMDFf', 1, NOW()),
+
+    ('Milica', 'Nikolić', '1993-08-25', 'F', 'milica.nikolic@gmail.com',
+     '+381 66 444 5566', 'Vojvode Stepe 23, Beograd',
+     '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+     'c2VlZF9jbGllbnRfMDJf', 1, NOW()),
+
+    ('Lazar', 'Ilić', '1990-12-01', 'M', 'lazar.ilic@yahoo.com',
+     '+381 60 555 6677', 'Bulevar Kralja Petra 71, Kragujevac',
+     '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+     'c2VlZF9jbGllbnRfMDNf', 1, NOW()),
+
+    ('Ana', 'Stojanović', '1997-06-15', 'F', 'ana.stojanovic@hotmail.com',
+     '+381 69 666 7788', 'Đorđa Stanojevića 12, Beograd',
+     '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+     'c2VlZF9jbGllbnRfMDRf', 1, NOW())
+    ON DUPLICATE KEY UPDATE email = email;
+
+
+-- ============================================================
+-- COMPANIES (firme za poslovne racune)
+-- ============================================================
+
+INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
+                       majority_owner_id, active, created_at)
+VALUES
+    (1, 'TechStar DOO', '12345678', '123456789', '62.01',
+     'Bulevar Mihajla Pupina 10, Novi Beograd',
+     NULL, 1, NOW()),
+    (2, 'Green Food AD', '87654321', '987654321', '10.10',
+     'Industrijska zona bb, Subotica',
+     NULL, 1, NOW())
+    ON DUPLICATE KEY UPDATE name = name;
+
+
+-- ============================================================
+-- ACCOUNTS (racuni klijenata)
+-- ============================================================
+-- Enum vrednosti:
+--   AccountType:    CHECKING, FOREIGN, BUSINESS, MARGIN
+--   AccountSubtype: PERSONAL, SAVINGS, PENSION, YOUTH, SALARY, STANDARD
+--   AccountStatus:  ACTIVE, INACTIVE
+--
+-- client_id:   1=Stefan, 2=Milica, 3=Lazar, 4=Ana
+-- employee_id: 1=Nikola, 2=Tamara, 3=Djordje, 4=Maja
+-- currency_id: 1=EUR, 2=CHF, 3=USD, 4=GBP, 5=JPY, 6=CAD, 7=AUD, 8=RSD
+
+INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
+                      client_id, company_id, employee_id,
+                      balance, available_balance,
+                      daily_limit, monthly_limit,
+                      daily_spending, monthly_spending,
+                      maintenance_fee, expiration_date, status, name, created_at)
+VALUES
+    -- ─── Stefan Jovanović (client_id=1) — 3 aktivna racuna ─────────────────
+    -- GET /accounts/my → 3 racuna, sortirano po available_balance DESC:
+    --   Stednja(520000) > Glavni(178000) > Euro(2350)
+
+    -- Stefanov tekuci standardni (RSD)
+    ('222000112345678911', 'CHECKING', 'STANDARD', 8, 1, NULL, 1,
+     185000.0000, 178000.0000,
+     250000.0000, 1000000.0000,
+     7000.0000, 45000.0000,
+     255.0000, '2030-01-01', 'ACTIVE', 'Glavni račun', NOW()),
+
+    -- Stefanov stedni (RSD)
+    ('222000112345678912', 'CHECKING', 'SAVINGS', 8, 1, NULL, 1,
+     520000.0000, 520000.0000,
+     100000.0000, 500000.0000,
+     0.0000, 0.0000,
+     150.0000, '2030-06-01', 'ACTIVE', 'Štednja', NOW()),
+
+    -- Stefanov devizni (EUR)
+    ('222000121345678921', 'FOREIGN', 'PERSONAL', 1, 1, NULL, 2,
+     2500.0000, 2350.0000,
+     5000.0000, 20000.0000,
+     150.0000, 800.0000,
+     0.0000, '2030-01-01', 'ACTIVE', 'Euro račun', NOW()),
+
+    -- ─── Milica Nikolić (client_id=2) — 1 licni + 1 poslovni ──────────────
+    -- Poslovni racun: account_type=BUSINESS, company_id=1 (TechStar DOO)
+
+    -- Milicin tekuci (RSD)
+    ('222000112345678913', 'CHECKING', 'STANDARD', 8, 2, NULL, 1,
+     95000.0000, 92000.0000,
+     250000.0000, 1000000.0000,
+     3000.0000, 28000.0000,
+     255.0000, '2031-03-15', 'ACTIVE', 'Lični račun', NOW()),
+
+    -- Milicin poslovni (RSD) — vezan za TechStar DOO
+    ('222000112345678914', 'BUSINESS', 'STANDARD', 8, 2, 1, 2,
+     1250000.0000, 1230000.0000,
+     1000000.0000, 5000000.0000,
+     20000.0000, 350000.0000,
+     500.0000, '2032-01-01', 'ACTIVE', 'TechStar poslovanje', NOW()),
+
+    -- ─── Lazar Ilić (client_id=3) — 1 tekuci + 1 devizni USD ──────────────
+
+    -- Lazarev tekuci (RSD)
+    ('222000112345678915', 'CHECKING', 'STANDARD', 8, 3, NULL, 3,
+     310000.0000, 305000.0000,
+     250000.0000, 1000000.0000,
+     5000.0000, 62000.0000,
+     255.0000, '2030-09-01', 'ACTIVE', 'Tekući', NOW()),
+
+    -- Lazarev devizni (USD)
+    ('222000121345678922', 'FOREIGN', 'PERSONAL', 3, 3, NULL, 3,
+     1800.0000, 1800.0000,
+     3000.0000, 15000.0000,
+     0.0000, 0.0000,
+     0.0000, '2031-01-01', 'ACTIVE', 'Dollar savings', NOW()),
+
+    -- ─── Ana Stojanović (client_id=4) — 1 aktivan + 1 neaktivan ───────────
+    -- GET /accounts/my → vraca SAMO 1 (ACTIVE), neaktivan se filtrira
+
+    -- Anin neaktivan racun
+    ('222000112345678916', 'CHECKING', 'STANDARD', 8, 4, NULL, 4,
+     50000.0000, 50000.0000,
+     250000.0000, 1000000.0000,
+     0.0000, 0.0000,
+     255.0000, '2028-01-01', 'INACTIVE', 'Stari račun', NOW()),
+
+    -- Anin aktivan racun
+    ('222000112345678917', 'CHECKING', 'YOUTH', 8, 4, NULL, 4,
+     72000.0000, 70500.0000,
+     150000.0000, 600000.0000,
+     1500.0000, 18000.0000,
+     0.0000, '2031-06-01', 'ACTIVE', 'Račun za mlade', NOW())
+
+    ON DUPLICATE KEY UPDATE account_number = account_number;
