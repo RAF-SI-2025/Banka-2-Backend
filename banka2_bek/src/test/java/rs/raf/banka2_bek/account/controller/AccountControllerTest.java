@@ -1,6 +1,5 @@
-package rs.raf.banka2_bek.acconut.controller;
+package rs.raf.banka2_bek.account.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,7 +10,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import rs.raf.banka2_bek.account.controller.AccountController;
 import rs.raf.banka2_bek.account.controller.exception_handler.AccountExceptionHandler;
 import rs.raf.banka2_bek.account.dto.AccountResponseDto;
 import rs.raf.banka2_bek.company.dto.CompanyDto;

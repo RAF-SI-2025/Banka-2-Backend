@@ -1,12 +1,13 @@
 package rs.raf.banka2_bek.account.controller.exception_handler;
 
+import rs.raf.banka2_bek.account.controller.AccountController;
+
+import java.util.Map;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import rs.raf.banka2_bek.account.controller.AccountController;
-
-import java.util.Map;
 
 @RestControllerAdvice(assignableTypes = AccountController.class)
 public class AccountExceptionHandler {

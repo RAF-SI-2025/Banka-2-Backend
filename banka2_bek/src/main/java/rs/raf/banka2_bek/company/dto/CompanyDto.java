@@ -5,6 +5,8 @@ import lombok.Data;
 
 @Data
 @Builder
+
+// TODO actual companyDto - was added to implement accountService
 public class CompanyDto {
     private Long id;
     private String name;

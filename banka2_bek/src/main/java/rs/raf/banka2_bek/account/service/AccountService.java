@@ -2,6 +2,7 @@ package rs.raf.banka2_bek.account.service;
 
 import rs.raf.banka2_bek.account.dto.AccountResponseDto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public interface AccountService {
@@ -24,4 +25,24 @@ public interface AccountService {
      * @throws IllegalStateException    if the authenticated user is not the account owner
      */
     AccountResponseDto getAccountById(Long accountId);
+
+    /**
+     * updates the name of the acc
+     * only owner can change it
+     * cannot be the same as the old one
+     * @param accountId
+     * @param newName
+     * @return
+     */
+    AccountResponseDto updateAccountName(Long accountId, String newName);
+
+    /**
+     * updating limit for acc
+     * @param accountId
+     * @param dailyLimit
+     * @param monthlyLimit
+     * @return
+     */
+
+    AccountResponseDto updateAccountLimits(Long accountId, BigDecimal dailyLimit, BigDecimal monthlyLimit);
 }
