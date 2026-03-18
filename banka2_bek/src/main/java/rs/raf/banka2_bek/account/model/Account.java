@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.account.model;
 
+import rs.raf.banka2_bek.auth.model.User;
 import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.company.model.Company;
 import rs.raf.banka2_bek.currency.model.Currency;
@@ -48,8 +49,11 @@ public class Account {
 
     // Vlasnik: fizičko lice (null ako je kompanija vlasnik)
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "client_id")
-    private Client client;
+    @JoinColumn(
+            name = "client_id",
+            foreignKey = @ForeignKey(name = "FK_accounts_users") // Menjamo naziv i vezu
+    )
+    private User user;
 
     // Vlasnik: pravno lice (null ako je klijent vlasnik)
     @ManyToOne(fetch = FetchType.LAZY)
@@ -116,6 +120,6 @@ public class Account {
     @AssertTrue(message = "Racun mora imati vlasnika: ili klijenta ili kompaniju, ali ne oba.")
     @Transient
     public boolean isOwnerValid() {
-        return (client == null) != (company == null);
+        return (user == null) != (company == null);
     }
 }

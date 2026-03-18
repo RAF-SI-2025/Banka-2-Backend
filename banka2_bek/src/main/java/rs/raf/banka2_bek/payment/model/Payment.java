@@ -1,4 +1,4 @@
-package com.banka.model;
+package rs.raf.banka2_bek.payment.model;
 
 import jakarta.persistence.*;
 import lombok.*;

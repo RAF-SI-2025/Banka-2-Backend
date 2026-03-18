@@ -57,7 +57,6 @@ public class Company {
 
     // Zaposleni koji rade u ovoj kompaniji (ovlašćene osobe)
     @OneToMany(mappedBy = "company", cascade = CascadeType.ALL, orphanRemoval = true)
-    @Builder.Default
     private List<AuthorizedPerson> authorizedPersons = new ArrayList<>();
 
     @OneToMany(mappedBy = "company", cascade = CascadeType.ALL, orphanRemoval = true)

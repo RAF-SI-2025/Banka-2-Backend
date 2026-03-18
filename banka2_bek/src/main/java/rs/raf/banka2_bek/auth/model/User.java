@@ -1,14 +1,15 @@
 package rs.raf.banka2_bek.auth.model;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.NoArgsConstructor;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
+import rs.raf.banka2_bek.account.model.Account;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @Entity
 @Table(
@@ -17,6 +18,9 @@ import java.util.Set;
                 @UniqueConstraint(name = "uk_users_email", columnNames = "email")
         }
 )
+@NoArgsConstructor // Hibernate zahteva prazan konstruktor
+@AllArgsConstructor // Builder zahteva konstruktor sa svim poljima
+@Builder
 public class User implements UserDetails {
 
     @Id
@@ -64,8 +68,6 @@ public class User implements UserDetails {
     @Column(nullable = false, length = 50)
     private String role = "CLIENT";
 
-    public User() {
-    }
 
     public User(String firstName, String lastName, String email, String password, boolean active, String role) {
         this.firstName = firstName;
@@ -212,4 +214,9 @@ public class User implements UserDetails {
     public void setRole(String role) {
         this.role = role;
     }
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<Account> accounts = new ArrayList<>();
+
 }
