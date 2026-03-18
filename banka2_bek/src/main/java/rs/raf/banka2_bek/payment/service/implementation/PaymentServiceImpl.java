@@ -21,12 +21,16 @@ import rs.raf.banka2_bek.payment.model.PaymentStatus;
 import rs.raf.banka2_bek.payment.repository.AccountRepository;
 import rs.raf.banka2_bek.payment.repository.PaymentRepository;
 import rs.raf.banka2_bek.payment.service.PaymentService;
+import rs.raf.banka2_bek.transaction.dto.TransactionListItemDto;
+import rs.raf.banka2_bek.transaction.dto.TransactionType;
 import rs.raf.banka2_bek.transaction.service.TransactionService;
+import rs.raf.banka2_bek.transfer.model.TransferType;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Map;
 import java.util.Set;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
@@ -156,9 +160,24 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public Page<PaymentListItemDto> getPayments(Pageable pageable) {
+    public Page<PaymentListItemDto> getPayments(
+            Pageable pageable,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            BigDecimal minAmount,
+            BigDecimal maxAmount,
+            PaymentStatus status
+    ) {
         User client = getAuthenticatedClient();
-        return paymentRepository.findByUserAccounts(client.getId(), pageable)
+        return paymentRepository.findByUserAccountsWithFilters(
+                        client.getId(),
+                        fromDate,
+                        toDate,
+                        minAmount,
+                        maxAmount,
+                        status,
+                        pageable
+                )
                 .map(this::toListItem);
     }
 
@@ -170,9 +189,16 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public Page<PaymentListItemDto> getPaymentHistory(Pageable pageable) {
-        // For now history returns the same list as /payments.
-        return getPayments(pageable);
+    public Page<TransactionListItemDto> getPaymentHistory(
+            Pageable pageable,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            BigDecimal minAmount,
+            BigDecimal maxAmount,
+            TransactionType type
+    ) {
+        return transactionService.getTransactions(pageable, fromDate, toDate, minAmount, maxAmount, type);
+               // .map(this::toPaymentHistoryItem);
     }
 
     private BigDecimal getFxRate(String from, String to) {
@@ -220,6 +246,18 @@ public class PaymentServiceImpl implements PaymentService {
                 .build();
     }
 
+    /*private PaymentListItemDto toPaymentHistoryItem(TransactionListItemDto transaction) {
+        return PaymentListItemDto.builder()
+                .id(transaction.getPaymentId() != null ? transaction.getPaymentId() : transaction.getId())
+                .orderNumber(transaction.getOrderNumber())
+                .fromAccount(transaction.getFromAccount())
+                .toAccount(transaction.getToAccount())
+                .amount(transaction.getAmount() != null ? transaction.getAmount() : resolveAmount(transaction))
+                .status(transaction.getStatus())
+                .createdAt(transaction.getCreatedAt())
+                .build();
+    } */
+
     private String getAuthenticatedUsername() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -243,6 +281,13 @@ public class PaymentServiceImpl implements PaymentService {
 
     private String generateOrderNumber() {
         return "PAY-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    }
+
+    private BigDecimal resolveAmount(TransactionListItemDto transaction) {
+        BigDecimal debit = transaction.getDebit() == null ? BigDecimal.ZERO : transaction.getDebit();
+        return debit.compareTo(BigDecimal.ZERO) > 0
+                ? debit
+                : (transaction.getCredit() == null ? BigDecimal.ZERO : transaction.getCredit());
     }
 }
 

@@ -16,4 +16,3 @@ public class TransactionListItemDto {
     BigDecimal credit;
     LocalDateTime createdAt;
 }
-

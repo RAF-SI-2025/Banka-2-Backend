@@ -11,6 +11,7 @@ import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.auth.model.User;
 import rs.raf.banka2_bek.auth.repository.UserRepository;
 import rs.raf.banka2_bek.payment.model.Payment;
+import rs.raf.banka2_bek.payment.model.PaymentStatus;
 import rs.raf.banka2_bek.transaction.dto.TransactionListItemDto;
 import rs.raf.banka2_bek.transaction.dto.TransactionResponseDto;
 import rs.raf.banka2_bek.transaction.dto.TransactionType;
@@ -66,7 +67,29 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public Page<TransactionListItemDto> getTransactions(Pageable pageable) {
         User currentUser = getAuthenticatedUser();
-        return transactionRepository.findByAccountClientId(currentUser.getId(), pageable)
+        return transactionRepository.findByAccountUserId(currentUser.getId(), pageable)
+                .map(this::toListItem);
+    }
+
+    @Override
+    public Page<TransactionListItemDto> getTransactions(
+            Pageable pageable,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            BigDecimal minAmount,
+            BigDecimal maxAmount,
+            TransactionType type
+    ) {
+        User currentUser = getAuthenticatedUser();
+        return transactionRepository.findPaymentTransactionsByAccountUserIdAndFilters(
+                        currentUser.getId(),
+                        fromDate,
+                        toDate,
+                        minAmount,
+                        maxAmount,
+                        type,
+                        pageable
+                )
                 .map(this::toListItem);
     }
 
@@ -125,5 +148,9 @@ public class TransactionServiceImpl implements TransactionService {
     private BigDecimal orZero(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
     }
-}
 
+    private BigDecimal resolveAmount(Transaction transaction) {
+        BigDecimal debit = orZero(transaction.getDebit());
+        return debit.compareTo(BigDecimal.ZERO) > 0 ? debit : orZero(transaction.getCredit());
+    }
+}
