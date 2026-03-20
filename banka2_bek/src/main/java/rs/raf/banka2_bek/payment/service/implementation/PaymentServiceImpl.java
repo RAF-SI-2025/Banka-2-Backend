@@ -160,7 +160,8 @@ public class PaymentServiceImpl implements PaymentService {
             BigDecimal maxAmount,
             PaymentStatus status
     ) {
-        Client client = getAuthenticatedClient();
+        Client client = getOptionalClient();
+        if (client == null) return Page.empty(pageable);
         return paymentRepository.findByUserAccountsWithFilters(
                         client.getId(),
                         fromDate,
@@ -287,9 +288,18 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     private Client getAuthenticatedClient() {
-        String username = getAuthenticatedUsername();
-        return clientRepository.findByEmail(username)
-                .orElseThrow(() -> new IllegalArgumentException("Authenticated client does not exist."));
+        Client client = getOptionalClient();
+        if (client == null) throw new IllegalArgumentException("Authenticated client does not exist.");
+        return client;
+    }
+
+    private Client getOptionalClient() {
+        try {
+            String username = getAuthenticatedUsername();
+            return clientRepository.findByEmail(username).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String generateOrderNumber() {

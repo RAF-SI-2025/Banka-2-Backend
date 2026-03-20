@@ -225,7 +225,8 @@ public class AccountServiceImplementation implements AccountService {
     @Override
     @Transactional(readOnly = true)
     public List<AccountResponseDto> getMyAccounts() {
-        Client client = getAuthenticatedClient();
+        Client client = getOptionalClient();
+        if (client == null) return new ArrayList<>();
         List<Account> accounts = accountRepository
                 .findByClientIdAndStatusOrderByAvailableBalanceDesc(
                         client.getId(), AccountStatus.ACTIVE
@@ -378,10 +379,19 @@ public class AccountServiceImplementation implements AccountService {
     }
 
     private Client getAuthenticatedClient() {
-        String email = getAuthenticatedEmail();
-        return clientRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Client with email " + email + " not found."
-                ));
+        Client client = getOptionalClient();
+        if (client == null) {
+            throw new IllegalArgumentException("Client not found for authenticated user.");
+        }
+        return client;
+    }
+
+    private Client getOptionalClient() {
+        try {
+            String email = getAuthenticatedEmail();
+            return clientRepository.findByEmail(email).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

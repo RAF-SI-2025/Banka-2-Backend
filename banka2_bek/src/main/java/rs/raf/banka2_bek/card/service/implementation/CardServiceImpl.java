@@ -20,6 +20,7 @@ import rs.raf.banka2_bek.client.repository.ClientRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -65,7 +66,8 @@ public class CardServiceImpl implements CardService {
     @Override
     @Transactional(readOnly = true)
     public List<CardResponseDto> getMyCards() {
-        Client client = getAuthenticatedClient();
+        Client client = getOptionalClient();
+        if (client == null) return Collections.emptyList();
         return cardRepository.findByClientId(client.getId()).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -176,15 +178,21 @@ public class CardServiceImpl implements CardService {
     }
 
     private Client getAuthenticatedClient() {
+        Client client = getOptionalClient();
+        if (client == null) throw new RuntimeException("Klijent nije pronadjen");
+        return client;
+    }
+
+    private Client getOptionalClient() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String email;
+        if (auth == null) return null;
         Object principal = auth.getPrincipal();
+        String email;
         if (principal instanceof UserDetails userDetails) {
             email = userDetails.getUsername();
         } else {
             email = principal.toString();
         }
-        return clientRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Klijent nije pronadjen"));
+        return clientRepository.findByEmail(email).orElse(null);
     }
 }
