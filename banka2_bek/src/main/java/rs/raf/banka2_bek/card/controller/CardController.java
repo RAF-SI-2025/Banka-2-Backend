@@ -6,15 +6,28 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import rs.raf.banka2_bek.account.model.Account;
+import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.card.dto.CardLimitUpdateDto;
 import rs.raf.banka2_bek.card.dto.CardResponseDto;
 import rs.raf.banka2_bek.card.dto.CreateCardRequestDto;
+import rs.raf.banka2_bek.card.model.CardRequest;
+import rs.raf.banka2_bek.card.repository.CardRequestRepository;
 import rs.raf.banka2_bek.card.service.CardService;
+import rs.raf.banka2_bek.client.model.Client;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Tag(name = "Cards", description = "Card management API")
 @RestController
@@ -23,6 +36,9 @@ import java.util.List;
 public class CardController {
 
     private final CardService cardService;
+    private final CardRequestRepository cardRequestRepository;
+    private final AccountRepository accountRepository;
+    private final ClientRepository clientRepository;
 
     @Operation(summary = "Create card", description = "Client requests a new card for their account")
     @ApiResponses({
@@ -70,5 +86,98 @@ public class CardController {
             @PathVariable Long id,
             @Valid @RequestBody CardLimitUpdateDto request) {
         return ResponseEntity.ok(cardService.updateCardLimit(id, request.getCardLimit()));
+    }
+
+    // ===== Card Requests (klijent podnosi zahtev, admin odobrava) =====
+
+    @PostMapping("/requests")
+    public ResponseEntity<Map<String, Object>> submitCardRequest(@RequestBody Map<String, Object> body) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        Client client = clientRepository.findByEmail(email).orElse(null);
+        String clientName = client != null ? client.getFirstName() + " " + client.getLastName() : email;
+
+        Long accountId = Long.valueOf(String.valueOf(body.get("accountId")));
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("Racun nije pronadjen"));
+
+        BigDecimal limit = body.get("cardLimit") != null ? new BigDecimal(String.valueOf(body.get("cardLimit"))) : BigDecimal.valueOf(100000);
+
+        CardRequest req = CardRequest.builder()
+                .account(account)
+                .cardLimit(limit)
+                .clientEmail(email)
+                .clientName(clientName)
+                .status("PENDING")
+                .build();
+        req = cardRequestRepository.save(req);
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "id", req.getId(), "accountId", accountId, "status", "PENDING",
+                "clientName", clientName, "createdAt", req.getCreatedAt().toString()));
+    }
+
+    @GetMapping("/requests/my")
+    public ResponseEntity<Page<Map<String, Object>>> getMyCardRequests(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int limit) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        var pageable = PageRequest.of(page, limit, Sort.by("createdAt").descending());
+        return ResponseEntity.ok(cardRequestRepository.findByClientEmail(email, pageable).map(this::toCardRequestMap));
+    }
+
+    @GetMapping("/requests")
+    public ResponseEntity<Page<Map<String, Object>>> getAllCardRequests(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int limit) {
+        var pageable = PageRequest.of(page, limit, Sort.by("createdAt").descending());
+        if (status != null && !status.isBlank()) {
+            return ResponseEntity.ok(cardRequestRepository.findByStatus(status, pageable).map(this::toCardRequestMap));
+        }
+        return ResponseEntity.ok(cardRequestRepository.findAll(pageable).map(this::toCardRequestMap));
+    }
+
+    @PatchMapping("/requests/{id}/approve")
+    public ResponseEntity<Map<String, Object>> approveCardRequest(@PathVariable Long id) {
+        CardRequest req = cardRequestRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));
+        if (!"PENDING".equals(req.getStatus())) throw new IllegalStateException("Zahtev je vec obradjen");
+
+        Account account = req.getAccount();
+        Client owner = account.getClient();
+        if (owner == null) throw new IllegalStateException("Racun nema vlasnika");
+        cardService.createCardForAccount(account.getId(), owner.getId(), req.getCardLimit());
+
+        String employeeEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+        req.setStatus("APPROVED");
+        req.setProcessedAt(LocalDateTime.now());
+        req.setProcessedBy(employeeEmail);
+        cardRequestRepository.save(req);
+        return ResponseEntity.ok(toCardRequestMap(req));
+    }
+
+    @PatchMapping("/requests/{id}/reject")
+    public ResponseEntity<Map<String, Object>> rejectCardRequest(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
+        CardRequest req = cardRequestRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));
+        if (!"PENDING".equals(req.getStatus())) throw new IllegalStateException("Zahtev je vec obradjen");
+
+        String employeeEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+        req.setStatus("REJECTED");
+        req.setRejectionReason(body != null ? body.getOrDefault("reason", null) : null);
+        req.setProcessedAt(LocalDateTime.now());
+        req.setProcessedBy(employeeEmail);
+        cardRequestRepository.save(req);
+        return ResponseEntity.ok(toCardRequestMap(req));
+    }
+
+    private Map<String, Object> toCardRequestMap(CardRequest req) {
+        return Map.of(
+                "id", req.getId(),
+                "accountId", req.getAccount().getId(),
+                "accountNumber", req.getAccount().getAccountNumber(),
+                "cardLimit", req.getCardLimit(),
+                "clientEmail", req.getClientEmail(),
+                "clientName", req.getClientName(),
+                "status", req.getStatus(),
+                "createdAt", req.getCreatedAt().toString()
+        );
     }
 }

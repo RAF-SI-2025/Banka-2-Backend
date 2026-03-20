@@ -1,13 +1,21 @@
 package rs.raf.banka2_bek.account.controller;
 
-import rs.raf.banka2_bek.account.dto.AccountLimitsUpdateDto;
-import rs.raf.banka2_bek.account.dto.AccountNameUpdateDto;
-import rs.raf.banka2_bek.account.dto.AccountResponseDto;
-import rs.raf.banka2_bek.account.dto.CreateAccountDto;
+import rs.raf.banka2_bek.account.dto.*;
+import rs.raf.banka2_bek.account.model.AccountRequest;
+import rs.raf.banka2_bek.account.model.AccountType;
+import rs.raf.banka2_bek.account.model.AccountSubtype;
+import rs.raf.banka2_bek.account.repository.AccountRequestRepository;
 import rs.raf.banka2_bek.account.service.AccountService;
+import rs.raf.banka2_bek.client.model.Client;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.currency.repository.CurrencyRepository;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,6 +37,9 @@ import org.springframework.web.bind.annotation.*;
 public class AccountController {
 
     private final AccountService accountService;
+    private final AccountRequestRepository accountRequestRepository;
+    private final ClientRepository clientRepository;
+    private final CurrencyRepository currencyRepository;
 
     @Operation(summary = "Create account", description = "Employee creates a new checking or foreign currency account for a client or company")
     @ApiResponses({
@@ -126,5 +137,113 @@ public class AccountController {
             @Valid @RequestBody AccountLimitsUpdateDto request) {
         return ResponseEntity.ok(accountService.updateAccountLimits(
                 id, request.getDailyLimit(), request.getMonthlyLimit()));
+    }
+
+    // ===== Account Requests (klijent podnosi zahtev, admin odobrava) =====
+
+    @PostMapping("/requests")
+    public ResponseEntity<AccountRequestResponseDto> submitAccountRequest(@RequestBody AccountRequestDto dto) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        Client client = clientRepository.findByEmail(email).orElse(null);
+        String clientName = client != null ? client.getFirstName() + " " + client.getLastName() : email;
+
+        var currency = currencyRepository.findByCode(dto.getCurrency() != null ? dto.getCurrency() : "RSD")
+                .orElseThrow(() -> new IllegalArgumentException("Nepoznata valuta: " + dto.getCurrency()));
+
+        AccountRequest req = AccountRequest.builder()
+                .accountType(AccountType.valueOf(dto.getAccountType()))
+                .accountSubtype(dto.getAccountSubtype() != null ? AccountSubtype.valueOf(dto.getAccountSubtype()) : null)
+                .currency(currency)
+                .initialDeposit(dto.getInitialDeposit())
+                .createCard(dto.getCreateCard())
+                .clientEmail(email)
+                .clientName(clientName)
+                .status("PENDING")
+                .build();
+        req = accountRequestRepository.save(req);
+        return ResponseEntity.status(HttpStatus.CREATED).body(toRequestResponse(req));
+    }
+
+    @GetMapping("/requests/my")
+    public ResponseEntity<Page<AccountRequestResponseDto>> getMyAccountRequests(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int limit) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        var pageable = PageRequest.of(page, limit, Sort.by("createdAt").descending());
+        return ResponseEntity.ok(accountRequestRepository.findByClientEmail(email, pageable).map(this::toRequestResponse));
+    }
+
+    @GetMapping("/requests")
+    public ResponseEntity<Page<AccountRequestResponseDto>> getAllAccountRequests(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int limit) {
+        var pageable = PageRequest.of(page, limit, Sort.by("createdAt").descending());
+        if (status != null && !status.isBlank()) {
+            return ResponseEntity.ok(accountRequestRepository.findByStatus(status, pageable).map(this::toRequestResponse));
+        }
+        return ResponseEntity.ok(accountRequestRepository.findAll(pageable).map(this::toRequestResponse));
+    }
+
+    @PatchMapping("/requests/{id}/approve")
+    public ResponseEntity<AccountRequestResponseDto> approveAccountRequest(@PathVariable Long id) {
+        AccountRequest req = accountRequestRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));
+        if (!"PENDING".equals(req.getStatus())) {
+            throw new IllegalStateException("Zahtev je vec obradjen");
+        }
+        String employeeEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+
+        // Kreiraj racun
+        CreateAccountDto createDto = new CreateAccountDto();
+        createDto.setAccountType(req.getAccountType());
+        createDto.setAccountSubtype(req.getAccountSubtype());
+        createDto.setCurrency(req.getCurrency().getCode());
+        createDto.setInitialDeposit(req.getInitialDeposit() != null ? req.getInitialDeposit().doubleValue() : 0.0);
+        createDto.setOwnerEmail(req.getClientEmail());
+        createDto.setCreateCard(req.getCreateCard() != null && req.getCreateCard());
+        accountService.createAccount(createDto);
+
+        req.setStatus("APPROVED");
+        req.setProcessedAt(LocalDateTime.now());
+        req.setProcessedBy(employeeEmail);
+        accountRequestRepository.save(req);
+        return ResponseEntity.ok(toRequestResponse(req));
+    }
+
+    @PatchMapping("/requests/{id}/reject")
+    public ResponseEntity<AccountRequestResponseDto> rejectAccountRequest(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        AccountRequest req = accountRequestRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));
+        if (!"PENDING".equals(req.getStatus())) {
+            throw new IllegalStateException("Zahtev je vec obradjen");
+        }
+        String employeeEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+        req.setStatus("REJECTED");
+        req.setRejectionReason(body != null ? body.getOrDefault("reason", null) : null);
+        req.setProcessedAt(LocalDateTime.now());
+        req.setProcessedBy(employeeEmail);
+        accountRequestRepository.save(req);
+        return ResponseEntity.ok(toRequestResponse(req));
+    }
+
+    private AccountRequestResponseDto toRequestResponse(AccountRequest req) {
+        return AccountRequestResponseDto.builder()
+                .id(req.getId())
+                .accountType(req.getAccountType().name())
+                .accountSubtype(req.getAccountSubtype() != null ? req.getAccountSubtype().name() : null)
+                .currency(req.getCurrency().getCode())
+                .initialDeposit(req.getInitialDeposit())
+                .createCard(req.getCreateCard())
+                .clientEmail(req.getClientEmail())
+                .clientName(req.getClientName())
+                .status(req.getStatus())
+                .rejectionReason(req.getRejectionReason())
+                .createdAt(req.getCreatedAt())
+                .processedAt(req.getProcessedAt())
+                .processedBy(req.getProcessedBy())
+                .build();
     }
 }

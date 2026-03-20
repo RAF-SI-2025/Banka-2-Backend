@@ -33,7 +33,9 @@ public class ClientServiceImpl implements ClientService {
             throw new RuntimeException("Klijent sa ovim emailom vec postoji");
         }
 
-        String tempPassword = UUID.randomUUID().toString().substring(0, 12);
+        String password = (request.getPassword() != null && !request.getPassword().isBlank())
+                ? request.getPassword()
+                : UUID.randomUUID().toString().substring(0, 12);
         String salt = UUID.randomUUID().toString().substring(0, 16);
 
         Client client = Client.builder()
@@ -44,7 +46,7 @@ public class ClientServiceImpl implements ClientService {
                 .email(request.getEmail())
                 .phone(request.getPhone())
                 .address(request.getAddress())
-                .password(passwordEncoder.encode(tempPassword))
+                .password(passwordEncoder.encode(password + salt))
                 .saltPassword(salt)
                 .active(true)
                 .build();
@@ -57,7 +59,7 @@ public class ClientServiceImpl implements ClientService {
             user.setFirstName(request.getFirstName());
             user.setLastName(request.getLastName());
             user.setEmail(request.getEmail());
-            user.setPassword(passwordEncoder.encode(tempPassword));
+            user.setPassword(passwordEncoder.encode(password));
             user.setPhone(request.getPhone());
             user.setAddress(request.getAddress());
             user.setActive(true);

@@ -132,4 +132,15 @@ public class PaymentController {
     ) {
         return ResponseEntity.ok(paymentService.getPaymentHistory(pageable, fromDate, toDate, minAmount, maxAmount, type));
     }
+
+    // FIXME: Ukloniti hardcoded OTP kod 1234 kada bude gotova Android aplikacija
+    // Za sada prihvata bilo koji kod ili hardcoded 1234 za testiranje
+    @PostMapping("/verify")
+    public ResponseEntity<java.util.Map<String, Object>> verifyPayment(@RequestBody java.util.Map<String, Object> request) {
+        String code = String.valueOf(request.getOrDefault("code", ""));
+        if (!"1234".equals(code) && code.length() != 4) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("message", "Neispravan verifikacioni kod"));
+        }
+        return ResponseEntity.ok(java.util.Map.of("verified", true, "message", "Transakcija uspesno verifikovana"));
+    }
 }
