@@ -466,3 +466,172 @@ FROM clients c WHERE c.email = 'lazar.ilic@yahoo.com'
 AND NOT EXISTS (
     SELECT 1 FROM payment_recipients pr WHERE pr.client_id = c.id AND pr.account_number = '222000112345678917'
 );
+
+-- ============================================================
+-- LISTINGS (hartije od vrednosti za Celinu 3)
+-- ============================================================
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      outstanding_shares, dividend_yield, base_currency, quote_currency, liquidity,
+                      contract_size, contract_unit, settlement_date)
+SELECT * FROM (SELECT
+  'AAPL' AS ticker, 'Apple Inc.' AS name, 'NASDAQ' AS ea, 'STOCK' AS lt,
+  189.8400 AS price, 190.1200 AS ask, 189.5600 AS bid, 54230000 AS vol, 2.3400 AS pc, NOW() AS lr,
+  15500000000 AS os, 0.0055 AS dy, NULL AS bc, NULL AS qc, NULL AS liq, 1 AS cs, NULL AS cu, NULL AS sd
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'AAPL');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      outstanding_shares, dividend_yield, contract_size)
+SELECT * FROM (SELECT
+  'MSFT', 'Microsoft Corp.', 'NASDAQ', 'STOCK',
+  415.2600, 415.8000, 414.7200, 22100000, -1.1800, NOW(),
+  7430000000, 0.0072, 1
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'MSFT');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      outstanding_shares, dividend_yield, contract_size)
+SELECT * FROM (SELECT
+  'GOOG', 'Alphabet Inc.', 'NASDAQ', 'STOCK',
+  173.4500, 173.9000, 173.0000, 18500000, 0.8700, NOW(),
+  12200000000, 0.0000, 1
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'GOOG');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      outstanding_shares, dividend_yield, contract_size)
+SELECT * FROM (SELECT
+  'TSLA', 'Tesla Inc.', 'NASDAQ', 'STOCK',
+  248.9100, 249.5000, 248.3200, 72300000, -5.4300, NOW(),
+  3180000000, 0.0000, 1
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'TSLA');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      outstanding_shares, dividend_yield, contract_size)
+SELECT * FROM (SELECT
+  'AMZN', 'Amazon.com Inc.', 'NASDAQ', 'STOCK',
+  186.3200, 186.8000, 185.8400, 35600000, 1.5600, NOW(),
+  10300000000, 0.0000, 1
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'AMZN');
+
+-- Forex parovi
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      base_currency, quote_currency, liquidity, contract_size)
+SELECT * FROM (SELECT
+  'EUR/USD', 'Euro / US Dollar', 'FOREX', 'FOREX',
+  1.0856, 1.0858, 1.0854, 180000000, 0.0012, NOW(),
+  'EUR', 'USD', 'HIGH', 1000
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'EUR/USD');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      base_currency, quote_currency, liquidity, contract_size)
+SELECT * FROM (SELECT
+  'GBP/USD', 'British Pound / US Dollar', 'FOREX', 'FOREX',
+  1.2943, 1.2946, 1.2940, 95000000, -0.0008, NOW(),
+  'GBP', 'USD', 'HIGH', 1000
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'GBP/USD');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      base_currency, quote_currency, liquidity, contract_size)
+SELECT * FROM (SELECT
+  'USD/JPY', 'US Dollar / Japanese Yen', 'FOREX', 'FOREX',
+  149.2300, 149.2600, 149.2000, 120000000, 0.4500, NOW(),
+  'USD', 'JPY', 'HIGH', 1000
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'USD/JPY');
+
+-- Futures
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      contract_size, contract_unit, settlement_date)
+SELECT * FROM (SELECT
+  'CLM26', 'Crude Oil June 2026', 'CME', 'FUTURES',
+  68.4500, 68.5200, 68.3800, 312000, -0.8700, NOW(),
+  1000, 'Barrel', '2026-06-20'
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'CLM26');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      contract_size, contract_unit, settlement_date)
+SELECT * FROM (SELECT
+  'GCQ26', 'Gold August 2026', 'CME', 'FUTURES',
+  2345.8000, 2346.5000, 2345.1000, 185000, 12.4000, NOW(),
+  100, 'Troy Ounce', '2026-08-27'
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'GCQ26');
+
+INSERT INTO listings (ticker, name, exchange_acronym, listing_type, price, ask, bid, volume, price_change, last_refresh,
+                      contract_size, contract_unit, settlement_date)
+SELECT * FROM (SELECT
+  'SIH26', 'Silver March 2026', 'CME', 'FUTURES',
+  27.3500, 27.3900, 27.3100, 64000, 0.1800, NOW(),
+  5000, 'Troy Ounce', '2026-03-27'
+) AS tmp WHERE NOT EXISTS (SELECT 1 FROM listings WHERE ticker = 'SIH26');
+
+-- ============================================================
+-- LISTING DAILY PRICES (istorijski podaci za grafike)
+-- ============================================================
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 5 DAY), 185.20, 186.50, 184.10, -1.30, 48000000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 5 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 4 DAY), 186.50, 188.20, 185.80, 1.30, 51000000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 4 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 3 DAY), 187.10, 189.00, 186.40, 0.60, 53000000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 3 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 2 DAY), 188.40, 190.10, 187.50, 1.30, 55000000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 2 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 187.50, 189.90, 186.80, -0.90, 52000000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 1 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, CURDATE(), 189.84, 190.50, 188.20, 2.34, 54230000
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = CURDATE());
+
+-- EUR/USD istorija
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 3 DAY), 1.0830, 1.0865, 1.0810, -0.0015, 175000000
+FROM listings l WHERE l.ticker = 'EUR/USD'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 3 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 2 DAY), 1.0844, 1.0870, 1.0825, 0.0014, 178000000
+FROM listings l WHERE l.ticker = 'EUR/USD'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 2 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 1.0848, 1.0880, 1.0830, 0.0004, 182000000
+FROM listings l WHERE l.ticker = 'EUR/USD'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = DATE_SUB(CURDATE(), INTERVAL 1 DAY));
+
+INSERT INTO listing_daily_prices (listing_id, date, price, high, low, price_change, volume)
+SELECT l.id, CURDATE(), 1.0856, 1.0890, 1.0840, 0.0012, 180000000
+FROM listings l WHERE l.ticker = 'EUR/USD'
+AND NOT EXISTS (SELECT 1 FROM listing_daily_prices WHERE listing_id = l.id AND date = CURDATE());
+
+-- ============================================================
+-- ACTUARY INFO (aktuarski podaci za zaposlene)
+-- ============================================================
+
+INSERT INTO actuary_info (employee_id, actuary_type, daily_limit, used_limit, need_approval)
+SELECT e.id, 'SUPERVISOR', NULL, 0, false
+FROM employees e WHERE e.email = 'nikola.milenkovic@banka.rs'
+AND NOT EXISTS (SELECT 1 FROM actuary_info WHERE employee_id = e.id);
+
+INSERT INTO actuary_info (employee_id, actuary_type, daily_limit, used_limit, need_approval)
+SELECT e.id, 'AGENT', 100000, 0, false
+FROM employees e WHERE e.email = 'tamara.pavlovic@banka.rs'
+AND NOT EXISTS (SELECT 1 FROM actuary_info WHERE employee_id = e.id);
+
+INSERT INTO actuary_info (employee_id, actuary_type, daily_limit, used_limit, need_approval)
+SELECT e.id, 'AGENT', 50000, 15000, true
+FROM employees e WHERE e.email = 'nemanja.savic@banka.rs'
+AND NOT EXISTS (SELECT 1 FROM actuary_info WHERE employee_id = e.id);
