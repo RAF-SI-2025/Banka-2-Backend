@@ -21,11 +21,18 @@ public class EmployeeUserDetails implements UserDetails {
     public Collection<? extends GrantedAuthority> getAuthorities() {
         Set<GrantedAuthority> authorities = new HashSet<>();
         Set<String> permissions = employee.getPermissions();
+
         if (permissions != null && permissions.contains("ADMIN")) {
             authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
-        } else {
-            authorities.add(new SimpleGrantedAuthority("ROLE_EMPLOYEE"));
         }
+        authorities.add(new SimpleGrantedAuthority("ROLE_EMPLOYEE"));
+
+        if (permissions != null) {
+            for (String permission : permissions) {
+                authorities.add(new SimpleGrantedAuthority(permission));
+            }
+        }
+
         return authorities;
     }
 

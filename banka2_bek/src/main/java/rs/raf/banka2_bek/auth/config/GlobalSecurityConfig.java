@@ -58,6 +58,7 @@ public class GlobalSecurityConfig  {
                         .requestMatchers(org.springframework.http.HttpMethod.PATCH, "/cards/requests/*/reject").hasRole("ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/cards/requests").hasRole("ADMIN")
                         .requestMatchers("/loans/requests/**").hasRole("ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/listings/refresh").hasRole("EMPLOYEE")
                         .anyRequest().authenticated()
                 )
                 .formLogin(AbstractHttpConfigurer::disable)

@@ -3,12 +3,17 @@ package rs.raf.banka2_bek.stock.service.implementation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
 import rs.raf.banka2_bek.stock.dto.ListingDto;
+import rs.raf.banka2_bek.stock.mapper.ListingMapper;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingDailyPriceInfoRepository;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
+import rs.raf.banka2_bek.stock.repository.ListingSpec;
 import rs.raf.banka2_bek.stock.service.ListingService;
 
 import java.util.List;
@@ -22,24 +27,28 @@ public class ListingServiceImpl implements ListingService {
 
     @Override
     public Page<ListingDto> getListings(String type, String search, int page, int size) {
-        // TODO: Implementirati
-        // 1. Parsirati type string u ListingType enum
-        // 2. Ako je search null/prazan, dohvatiti sve po tipu sa paginacijom
-        // 3. Ako je search zadat, filtrirati po ticker ILI name (case-insensitive)
-        // 4. Mapirati svaki Listing u ListingDto (ukljuciti izvedene podatke)
-        //
-        // IZVEDENI PODACI za svaki listing:
-        //   - changePercent = (priceChange / (price - priceChange)) * 100
-        //   - maintenanceMargin:
-        //       STOCK: 50% * price
-        //       FOREX: contractSize * price * 10%
-        //       FUTURES: contractSize * price * 10%
-        //   - initialMarginCost = maintenanceMargin * 1.1
-        //   - marketCap = outstandingShares * price (samo za STOCK)
-        //
-        // NAPOMENA: Klijenti vide samo STOCK i FUTURES, aktuari sve.
-        //           Ovu proveru raditi u controlleru ili ovde.
-        throw new UnsupportedOperationException("TODO: Implementirati getListings");
+        ListingType listingType;
+        try {
+            listingType = ListingType.valueOf(type.toUpperCase());
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new IllegalArgumentException("Nepoznat tip hartije: " + type);
+        }
+
+        if (listingType == ListingType.FOREX && isClient()) {
+            throw new IllegalStateException("Klijenti nemaju pristup FOREX hartijama.");
+        }
+
+        var pageable = PageRequest.of(page, size, Sort.by("ticker").ascending());
+        return listingRepository
+                .findAll(ListingSpec.byTypeAndSearch(listingType, search), pageable)
+                .map(ListingMapper::toDto);
+    }
+
+    private boolean isClient() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) return false;
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_CLIENT"));
     }
 
     @Override
