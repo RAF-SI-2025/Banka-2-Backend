@@ -21,6 +21,7 @@ public final class OrderMapper {
 
         OrderDto dto = new OrderDto();
         dto.setId(order.getId());
+        dto.setListingId(order.getListing() != null ? order.getListing().getId() : null);
         dto.setUserRole(order.getUserRole());
         dto.setListingTicker(order.getListing() != null ? order.getListing().getTicker() : null);
         dto.setListingName(order.getListing() != null ? order.getListing().getName() : null);
@@ -52,7 +53,7 @@ public final class OrderMapper {
         order.setListing(listing);
         order.setOrderType(OrderType.valueOf(dto.getOrderType()));
         order.setQuantity(dto.getQuantity());
-        order.setContractSize(listing.getContractSize() != null ? listing.getContractSize() : 1);
+        order.setContractSize(dto.getContractSize());
         order.setLimitValue(dto.getLimitValue());
         order.setStopValue(dto.getStopValue());
         order.setDirection(OrderDirection.valueOf(dto.getDirection()));

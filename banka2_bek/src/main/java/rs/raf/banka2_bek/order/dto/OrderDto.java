@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 @Data
 public class OrderDto {
     private Long id;
+    private Long listingId;
     private String userName;
     private String userRole;
     private String listingTicker;

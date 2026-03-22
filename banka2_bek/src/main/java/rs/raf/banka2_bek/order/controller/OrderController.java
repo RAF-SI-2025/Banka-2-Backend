@@ -3,7 +3,6 @@ package rs.raf.banka2_bek.order.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.order.dto.CreateOrderDto;
@@ -32,7 +31,7 @@ public class OrderController {
      */
     @PostMapping
     public ResponseEntity<OrderDto> createOrder(@Valid @RequestBody CreateOrderDto dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createOrder(dto));
+        return ResponseEntity.ok(orderService.createOrder(dto));
     }
 
     /**
