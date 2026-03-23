@@ -5,10 +5,14 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.actuary.dto.ActuaryInfoDto;
 import rs.raf.banka2_bek.actuary.dto.UpdateActuaryLimitDto;
+import rs.raf.banka2_bek.actuary.mapper.ActuaryMapper;
+import rs.raf.banka2_bek.actuary.model.ActuaryInfo;
+import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
 import rs.raf.banka2_bek.actuary.service.ActuaryService;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -17,22 +21,23 @@ public class ActuaryServiceImpl implements ActuaryService {
     private final ActuaryInfoRepository actuaryInfoRepository;
 
     @Override
-    public List<ActuaryInfoDto> getAgents(String email, String firstName, String lastName) {
-        // TODO: Implementirati
-        // 1. Dohvatiti sve aktuare tipa AGENT iz baze
-        // 2. Filtrirati po email, firstName, lastName (case-insensitive, contains)
-        // 3. Mapirati u ActuaryInfoDto (ukljuciti ime zaposlenog)
-        // 4. Vratiti listu
-        throw new UnsupportedOperationException("TODO: Implementirati getAgents");
+    public List<ActuaryInfoDto> getAgents(String email, String firstName, String lastName, String position) {
+        List<ActuaryInfo> agents = actuaryInfoRepository.findByTypeAndFilters(
+                ActuaryType.AGENT, email, firstName, lastName, position
+        );
+        return agents.stream()
+                .map(ActuaryMapper::toDto)
+                .collect(Collectors.toList());
     }
 
     @Override
     public ActuaryInfoDto getActuaryInfo(Long employeeId) {
-        // TODO: Implementirati
-        // 1. Naci ActuaryInfo po employeeId
-        // 2. Ako ne postoji, baciti exception
-        // 3. Mapirati u DTO i vratiti
-        throw new UnsupportedOperationException("TODO: Implementirati getActuaryInfo");
+        ActuaryInfo info = actuaryInfoRepository.findByEmployeeId(employeeId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Actuary info for employee with ID " + employeeId + " not found."
+                ));
+
+        return ActuaryMapper.toDto(info);
     }
 
     @Override

@@ -10,6 +10,7 @@ public class ActuaryInfoDto {
     private Long employeeId;
     private String employeeName;
     private String employeeEmail;
+    private String employeePosition;
     private String actuaryType; // AGENT ili SUPERVISOR
     private BigDecimal dailyLimit;
     private BigDecimal usedLimit;

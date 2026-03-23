@@ -13,7 +13,7 @@ public interface ActuaryService {
      * Vraca listu svih agenata (za supervizor portal).
      * Filtriranje po email-u, imenu, prezimenu i poziciji.
      */
-    List<ActuaryInfoDto> getAgents(String email, String firstName, String lastName);
+    List<ActuaryInfoDto> getAgents(String email, String firstName, String lastName, String position);
 
     /**
      * Vraca aktuarske podatke za odredjenog zaposlenog.

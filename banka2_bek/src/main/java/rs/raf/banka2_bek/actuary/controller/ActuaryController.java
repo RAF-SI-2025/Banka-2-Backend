@@ -31,8 +31,9 @@ public class ActuaryController {
     public ResponseEntity<List<ActuaryInfoDto>> getAgents(
             @RequestParam(required = false) String email,
             @RequestParam(required = false) String firstName,
-            @RequestParam(required = false) String lastName) {
-        return ResponseEntity.ok(actuaryService.getAgents(email, firstName, lastName));
+            @RequestParam(required = false) String lastName,
+            @RequestParam(required = false) String position) {
+        return ResponseEntity.ok(actuaryService.getAgents(email, firstName, lastName, position));
     }
 
     /**
