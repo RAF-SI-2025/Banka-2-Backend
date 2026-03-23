@@ -1,23 +1,31 @@
 package rs.raf.banka2_bek.stock.service.implementation;
 
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
 import rs.raf.banka2_bek.stock.dto.ListingDto;
+import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingDailyPriceInfoRepository;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.service.ListingService;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Random;
 
 @Service
 @RequiredArgsConstructor
 public class ListingServiceImpl implements ListingService {
 
     private final ListingRepository listingRepository;
+    private final Random random = new Random();
     private final ListingDailyPriceInfoRepository dailyPriceRepository;
 
     @Override
@@ -67,18 +75,47 @@ public class ListingServiceImpl implements ListingService {
     }
 
     @Override
+    @Transactional
     public void refreshPrices() {
-        // TODO: Implementirati osvezavanje cena
-        // OPCIJA 1: AlphaVantage API (besplatan, 5 poziva/min)
-        //   - GET https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}
-        //   - Azurira price, ask, bid, volume, priceChange za akcije
-        //
-        // OPCIJA 2: Dummy osvezavanje
-        //   - Za svaki listing, dodaj random +/- 1-3% na price
-        //   - Azuriraj ask = price * 1.001, bid = price * 0.999
-        //   - Postavi lastRefresh na LocalDateTime.now()
-        //
-        // NAPOMENA: Ovo se moze pozivati @Scheduled(fixedRate = 900000) za 15 min
+        // 1. Proći kroz listinge
+        List<Listing> listings = listingRepository.findAll();
+
+        for (Listing listing : listings) {
+            BigDecimal currentPrice = listing.getPrice();
+            if (currentPrice == null) continue;
+
+            // 2. Ažurirati price-related podatke (Dummy logika +/- 2%)
+            double changePercent = 0.98 + (0.04 * random.nextDouble());
+            BigDecimal newPrice = currentPrice.multiply(BigDecimal.valueOf(changePercent))
+                    .setScale(4, RoundingMode.HALF_UP);
+
+            // Ask/Bid (Ask uvek malo veći, Bid malo manji)
+            BigDecimal newAsk = newPrice.multiply(BigDecimal.valueOf(1.002)).setScale(4, RoundingMode.HALF_UP);
+            BigDecimal newBid = newPrice.multiply(BigDecimal.valueOf(0.998)).setScale(4, RoundingMode.HALF_UP);
+
+            // Promena u odnosu na staru cenu
+            BigDecimal priceChange = newPrice.subtract(currentPrice);
+
+            // 3. Postaviti lastRefresh = now()
+            listing.setPrice(newPrice);
+            listing.setAsk(newAsk);
+            listing.setBid(newBid);
+            listing.setPriceChange(priceChange);
+            listing.setLastRefresh(LocalDateTime.now());
+
+            // Ažuriramo i volume (nasumično)
+            if (listing.getVolume() != null) {
+                listing.setVolume((long) (listing.getVolume() * (0.9 + (0.2 * random.nextDouble()))));
+            }
+        }
+
+        // 4. Poziv endpoint-a ažurira listinge u bazi
+        listingRepository.saveAll(listings);
+    }
+    @Scheduled(fixedRate = 900000)
+    public void scheduledRefresh() {
+        // Scheduler samo okida business metodu, ne sadrži logiku direktno
+        this.refreshPrices();
     }
 
     @Override
