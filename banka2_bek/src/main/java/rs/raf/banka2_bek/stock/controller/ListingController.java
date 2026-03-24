@@ -1,5 +1,9 @@
 package rs.raf.banka2_bek.stock.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -10,14 +14,7 @@ import rs.raf.banka2_bek.stock.service.ListingService;
 
 import java.util.List;
 
-/**
- * Controller za hartije od vrednosti.
- * Pristup: aktuari (sve hartije) i klijenti sa permisijom (samo STOCK i FUTURES).
- *
- * TODO: Dodati u GlobalSecurityConfig:
- *   .requestMatchers("/listings/**").hasAnyRole("ADMIN", "CLIENT", "EMPLOYEE")
- *   Dodatna provera u servisu: klijent vidi samo STOCK i FUTURES
- */
+@Tag(name = "Listings", description = "Hartije od vrednosti — pretraga, detalji i osvezavanje cena")
 @RestController
 @RequestMapping("/listings")
 @RequiredArgsConstructor
@@ -25,10 +22,13 @@ public class ListingController {
 
     private final ListingService listingService;
 
-    /**
-     * GET /listings?type=STOCK&search=AAPL&page=0&size=20
-     * Vraca stranicu hartija filtrirano po tipu i pretrazi.
-     */
+    @Operation(summary = "Paged listing search by type and optional keyword",
+               description = "Filtrira hartije po tipu (STOCK, FOREX, FUTURES) i opcionalnom pojmu koji se poklapa sa ticker-om ili nazivom (case-insensitive). Klijenti ne mogu da pristupe FOREX hartijama.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Uspesno vracena stranica hartija"),
+            @ApiResponse(responseCode = "400", description = "Nepoznat tip hartije"),
+            @ApiResponse(responseCode = "403", description = "Klijent pokusao da pristupi FOREX hartijama")
+    })
     @GetMapping
     public ResponseEntity<Page<ListingDto>> getListings(
             @RequestParam(defaultValue = "STOCK") String type,
@@ -38,19 +38,22 @@ public class ListingController {
         return ResponseEntity.ok(listingService.getListings(type, search, page, size));
     }
 
-    /**
-     * GET /listings/{id} - Detalji jedne hartije
-     */
+    @Operation(summary = "Get listing by ID")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Hartija pronadjena"),
+            @ApiResponse(responseCode = "404", description = "Hartija nije pronadjena")
+    })
     @GetMapping("/{id}")
     public ResponseEntity<ListingDto> getListingById(@PathVariable Long id) {
         return ResponseEntity.ok(listingService.getListingById(id));
     }
 
-    /**
-     * GET /listings/{id}/history?period=MONTH
-     * Vraca istorijske cene za grafik.
-     * period: DAY, WEEK, MONTH, YEAR, FIVE_YEARS, ALL
-     */
+    @Operation(summary = "Get price history for a listing",
+               description = "Vraca istorijske dnevne cene za grafik. Parametar period: DAY, WEEK, MONTH, YEAR, FIVE_YEARS, ALL")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Istorija cena uspesno vracena"),
+            @ApiResponse(responseCode = "404", description = "Hartija nije pronadjena")
+    })
     @GetMapping("/{id}/history")
     public ResponseEntity<List<ListingDailyPriceDto>> getListingHistory(
             @PathVariable Long id,
@@ -58,10 +61,9 @@ public class ListingController {
         return ResponseEntity.ok(listingService.getListingHistory(id, period));
     }
 
-    /**
-     * POST /listings/refresh - Rucno osvezavanje cena
-     * Samo za aktuare/admine.
-     */
+    @Operation(summary = "Manually refresh all listing prices",
+               description = "Rucno osvezava cene svih hartija. Dostupno samo zaposlenima.")
+    @ApiResponse(responseCode = "200", description = "Cene uspesno osvezene")
     @PostMapping("/refresh")
     public ResponseEntity<Void> refreshPrices() {
         listingService.refreshPrices();
