@@ -14,4 +14,5 @@ import java.util.Optional;
 public interface ListingRepository extends JpaRepository<Listing, Long>, JpaSpecificationExecutor<Listing> {
 
     Optional<Listing> findByTicker(String ticker);
+
 }

@@ -2,6 +2,7 @@ package rs.raf.banka2_bek.stock.service.implementation;
 
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.apache.coyote.BadRequestException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -12,19 +13,21 @@ import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
 import rs.raf.banka2_bek.stock.dto.ListingDto;
 import rs.raf.banka2_bek.stock.mapper.ListingMapper;
 import rs.raf.banka2_bek.stock.model.Listing;
+import rs.raf.banka2_bek.stock.model.ListingDailyPriceInfo;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingDailyPriceInfoRepository;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.repository.ListingSpec;
 import rs.raf.banka2_bek.stock.service.ListingService;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
-public class   ListingServiceImpl implements ListingService {
+public class ListingServiceImpl implements ListingService {
 
     private final ListingRepository listingRepository;
     private final ListingDailyPriceInfoRepository dailyPriceRepository;
@@ -60,11 +63,11 @@ public class   ListingServiceImpl implements ListingService {
 
         Optional<Listing> listingOptional = listingRepository.findById(id);
 
-        if (listingOptional.isEmpty())  throw new EntityNotFoundException("Listing id: " + id + " not found.");
+        if (listingOptional.isEmpty()) throw new EntityNotFoundException("Listing id: " + id + " not found.");
 
         Listing listing = listingOptional.get();
 
-        if(isClient() && listing.getListingType() == ListingType.FOREX)
+        if (isClient() && listing.getListingType() == ListingType.FOREX)
             throw new IllegalStateException("Klijenti nemaju pristup FOREX hartijama.");
 
         return ListingMapper.toDto(listing);
@@ -72,17 +75,42 @@ public class   ListingServiceImpl implements ListingService {
 
     @Override
     public List<ListingDailyPriceDto> getListingHistory(Long listingId, String period) {
-        // TODO: Implementirati
-        // 1. Na osnovu perioda izracunati fromDate:
-        //    DAY = danas
-        //    WEEK = danas - 7 dana
-        //    MONTH = danas - 30 dana
-        //    YEAR = danas - 365 dana
-        //    FIVE_YEARS = danas - 5*365 dana
-        //    ALL = od pocetka (LocalDate.MIN ili najraniji datum u bazi)
-        // 2. Dohvatiti ListingDailyPriceInfo iz baze za dati period
-        // 3. Mapirati u DTO listu
-        throw new UnsupportedOperationException("TODO: Implementirati getListingHistory");
+
+        if (!listingRepository.existsById(listingId))
+            throw new EntityNotFoundException("Listing id: " + listingId + " not found.");
+
+        LocalDate now = LocalDate.now();
+
+        List<ListingDailyPriceInfo> dailyPrices;
+
+        if ("DAY".equalsIgnoreCase(period)) dailyPrices = dailyPriceRepository.findByListingIdAndDate(listingId, now);
+
+        else if ("WEEK".equalsIgnoreCase(period))
+            dailyPrices = dailyPriceRepository.findByListingIdAndDateAfterOrderByDateDesc(
+                    listingId, now.minusDays(7)
+            );
+
+        else if ("MONTH".equalsIgnoreCase(period))
+            dailyPrices = dailyPriceRepository.findByListingIdAndDateAfterOrderByDateDesc(
+                    listingId, now.minusMonths(1)
+            );
+
+        else if ("YEAR".equalsIgnoreCase(period))
+            dailyPrices = dailyPriceRepository.findByListingIdAndDateAfterOrderByDateDesc(
+                    listingId, now.minusYears(1)
+            );
+
+        else if ("FIVE_YEARS".equalsIgnoreCase(period))
+            dailyPrices = dailyPriceRepository.findByListingIdAndDateAfterOrderByDateDesc(
+                    listingId, now.minusYears(5)
+            );
+
+        else if ("ALL".equalsIgnoreCase(period))
+            dailyPrices = dailyPriceRepository.findByListingIdOrderByDateDesc(listingId);
+
+        else throw new IllegalArgumentException("Period može biti: DAY, WEEK, MONTH, YEAR, FIVE_YEARS, ALL");
+
+        return dailyPrices.stream().map(ListingMapper::toDailyPriceDto).toList();
     }
 
     @Override

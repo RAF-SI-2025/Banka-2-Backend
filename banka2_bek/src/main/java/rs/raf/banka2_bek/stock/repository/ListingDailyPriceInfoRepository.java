@@ -15,4 +15,8 @@ public interface ListingDailyPriceInfoRepository extends JpaRepository<ListingDa
             Long listingId, LocalDate from, LocalDate to);
 
     List<ListingDailyPriceInfo> findByListingIdOrderByDateDesc(Long listingId);
+
+    List<ListingDailyPriceInfo> findByListingIdAndDate(Long listingId, LocalDate date);
+
+    List<ListingDailyPriceInfo> findByListingIdAndDateAfterOrderByDateDesc(Long listingId, LocalDate date);
 }
