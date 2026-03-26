@@ -1,5 +1,7 @@
 package rs.raf.banka2_bek.actuary.service.implementation;
 
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
@@ -14,6 +16,7 @@ import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
 import rs.raf.banka2_bek.actuary.service.ActuaryService;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -73,13 +76,19 @@ public class ActuaryServiceImpl implements ActuaryService {
     }
 
     @Override
+    @Transactional
     public ActuaryInfoDto resetUsedLimit(Long employeeId) {
-        // TODO: Implementirati
-        // 1. Proveriti da je ulogovani korisnik supervizor
-        // 2. Naci ActuaryInfo za datog agenta
-        // 3. Postaviti usedLimit na 0
-        // 4. Sacuvati i vratiti
-        throw new UnsupportedOperationException("TODO: Implementirati resetUsedLimit");
+        ActuaryInfo actuary = actuaryInfoRepository.findByEmployeeId(employeeId)
+                .orElseThrow(() -> new EntityNotFoundException("Actuary record not found for employee ID: " + employeeId));
+
+
+        if (actuary.getActuaryType() != ActuaryType.AGENT) {
+            throw new IllegalStateException("Reset is only allowed for Agents. Supervisors do not have limits.");
+        }
+
+        actuary.setUsedLimit(BigDecimal.ZERO);
+        ActuaryInfo updatedActuary = actuaryInfoRepository.save(actuary);
+        return ActuaryMapper.toDto(updatedActuary);
     }
 
     @Override

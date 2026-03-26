@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.actuary.service;
 
+import org.junit.jupiter.api.BeforeEach;
 import rs.raf.banka2_bek.actuary.dto.ActuaryInfoDto;
 import rs.raf.banka2_bek.actuary.dto.UpdateActuaryLimitDto;
 import rs.raf.banka2_bek.actuary.model.ActuaryInfo;
@@ -37,10 +38,30 @@ class ActuaryServiceImplTest {
     @InjectMocks
     private ActuaryServiceImpl actuaryService;
 
+    private Employee mockEmployee;
+    private ActuaryInfo mockActuaryInfo;
+    private final Long RESET_EMPLOYEE_ID = 1L;
     // ──────────────────────────────────────────────────────────────────
     //  Helperi za kreiranje test podataka
     // ──────────────────────────────────────────────────────────────────
 
+
+    @BeforeEach
+    void setUp() {
+        mockEmployee = Employee.builder()
+                .id(RESET_EMPLOYEE_ID)
+                .firstName("Luka")
+                .lastName("Draskovic")
+                .build();
+        mockEmployee.setEmail("luka@banka2.rs");
+
+        mockActuaryInfo = new ActuaryInfo();
+        mockActuaryInfo.setId(100L);
+        mockActuaryInfo.setEmployee(mockEmployee);
+        mockActuaryInfo.setUsedLimit(new BigDecimal("500.00"));
+        mockActuaryInfo.setDailyLimit(new BigDecimal("1000.00"));
+        mockActuaryInfo.setNeedApproval(false);
+    }
     private Employee createEmployee(Long id, String firstName, String lastName, String email) {
         Employee emp = Employee.builder()
                 .id(id).firstName(firstName).lastName(lastName).build();
@@ -358,6 +379,49 @@ class ActuaryServiceImplTest {
 
             assertTrue(ex.getMessage().contains("999"));
         }
+        @Test
+        @DisplayName("Treba resetovati limit kada je zaposleni AGENT")
+        void resetUsedLimit_Success() {
+            mockActuaryInfo.setActuaryType(ActuaryType.AGENT);
+
+            when(actuaryInfoRepository.findByEmployeeId(RESET_EMPLOYEE_ID))
+                    .thenReturn(Optional.of(mockActuaryInfo));
+            when(actuaryInfoRepository.save(any(ActuaryInfo.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+
+            ActuaryInfoDto result = actuaryService.resetUsedLimit(RESET_EMPLOYEE_ID);
+
+            assertEquals(BigDecimal.ZERO, result.getUsedLimit());
+            assertEquals("AGENT", result.getActuaryType());
+            assertEquals("Luka Draskovic", result.getEmployeeName());
+            verify(actuaryInfoRepository, times(1)).save(mockActuaryInfo);
+        }
+
+        @Test
+        @DisplayName("Treba baciti EntityNotFoundException kada zaposleni ne postoji")
+        void resetUsedLimit_NotFound() {
+            when(actuaryInfoRepository.findByEmployeeId(RESET_EMPLOYEE_ID))
+                    .thenReturn(Optional.empty());
+
+            assertThrows(jakarta.persistence.EntityNotFoundException.class,
+                    () -> actuaryService.resetUsedLimit(RESET_EMPLOYEE_ID));
+            verify(actuaryInfoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Treba baciti IllegalStateException kada se pokušava reset supervizora")
+        void resetUsedLimit_FailForSupervisor() {
+            mockActuaryInfo.setActuaryType(ActuaryType.SUPERVISOR);
+            when(actuaryInfoRepository.findByEmployeeId(RESET_EMPLOYEE_ID))
+                    .thenReturn(Optional.of(mockActuaryInfo));
+
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> actuaryService.resetUsedLimit(RESET_EMPLOYEE_ID));
+
+            assertTrue(exception.getMessage().contains("only allowed for Agents"));
+            verify(actuaryInfoRepository, never()).save(any());
+        }
+
     }
 
     @Nested

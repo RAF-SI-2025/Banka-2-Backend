@@ -2,6 +2,7 @@ package rs.raf.banka2_bek.actuary.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.actuary.dto.ActuaryInfoDto;
 import rs.raf.banka2_bek.actuary.dto.UpdateActuaryLimitDto;
@@ -60,6 +61,7 @@ public class ActuaryController {
      * Supervizor rucno resetuje dnevni limit agenta.
      */
     @PatchMapping("/{employeeId}/reset-limit")
+    @PreAuthorize("hasRole('SUPERVISOR')")
     public ResponseEntity<ActuaryInfoDto> resetUsedLimit(@PathVariable Long employeeId) {
         return ResponseEntity.ok(actuaryService.resetUsedLimit(employeeId));
     }
