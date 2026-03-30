@@ -212,17 +212,15 @@ public class MarginAccountService {
 
     /**
      * Vraca istoriju transakcija za dati margin racun.
-     * <p>
-     * TODO: Implementirati logiku:
-     *   1. Proveriti da margin racun postoji
-     *   2. Dohvatiti sve transakcije (findByMarginAccountIdOrderByCreatedAtDesc)
-     *   3. Mapirati u listu MarginTransactionDto
-     *
      * @param marginAccountId ID margin racuna
      * @return lista transakcija sortirana od najnovije
      */
     public List<MarginTransactionDto> getTransactions(Long marginAccountId) {
         // TODO: Validate account access before returning transactions
+        if (!marginAccountRepository.existsById(marginAccountId)) {
+            throw new EntityNotFoundException("Margin account with id: " + marginAccountId + " does not exist.");
+        }
+
         return marginTransactionRepository.findByMarginAccountIdOrderByCreatedAtDesc(marginAccountId)
                 .stream()
                 .map(this::toDto)
