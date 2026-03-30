@@ -123,8 +123,57 @@ public class MarginAccountService {
      * @param amount          iznos za uplatu
      */
     @Transactional
-    public void deposit(Long marginAccountId, BigDecimal amount) {
+    public void deposit(Long marginAccountId, BigDecimal amount, Authentication authentication) {
         // TODO: Implement deposit logic with margin recalculation
+
+        if (notClient(authentication))
+            throw new IllegalStateException("Access denied.");
+
+        User user = userRepository.findByEmail(authentication.getName()).orElseThrow(
+                () -> new EntityNotFoundException("Access denied.")
+        );
+
+        // 1. find MarginAccount by id
+        MarginAccount marginAccount = marginAccountRepository.findById(marginAccountId)
+                .orElseThrow(() -> new EntityNotFoundException("Account not found with id: " + marginAccountId));
+
+        // OWNERSHIP CHECK
+        if (!user.getId().equals(marginAccount.getUserId()))
+            throw new IllegalStateException("Access denied.");
+
+        // 2. increase initialMargin for the amount
+        BigDecimal updatedInitialMargin = marginAccount.getInitialMargin().add(amount);
+        marginAccount.setInitialMargin(updatedInitialMargin);
+
+        // 3. set new maintenanceMargin = initialMargin * MAINTENANCE_FACTOR
+        marginAccount.setMaintenanceMargin(marginAccount.getInitialMargin().multiply(MAINTENANCE_FACTOR));
+
+
+        // initialMargin >= maintenanceMargin?
+        boolean overMaintenanceMargin = marginAccount.getInitialMargin().compareTo(marginAccount.getMaintenanceMargin()) >= 0;
+        // account.status == BLOCKED ?
+        boolean isBlocked = marginAccount.getStatus().equals(MarginAccountStatus.BLOCKED);
+
+        // 4. if account could be unblocked -> activate it
+        if (isBlocked && overMaintenanceMargin) marginAccount.setStatus(MarginAccountStatus.ACTIVE);
+
+        // 5. save marginAccount
+        marginAccountRepository.save(marginAccount);
+
+        String transactionDescription =
+                "Executed transaction. Amount deposited: " + amount + ". Current balance: " + updatedInitialMargin + ".";
+
+        // 6. create Transaction (type = DEPOSIT)
+        MarginTransaction transaction = MarginTransaction.builder()
+                .marginAccount(marginAccount)
+                .type(MarginTransactionType.DEPOSIT)
+                .amount(amount)
+                .description(transactionDescription)
+                .build();
+
+        // 7. save Transaction
+        marginTransactionRepository.save(transaction);
+
         log.info("Deposit {} to margin account {}", amount, marginAccountId);
     }
 
@@ -148,14 +197,8 @@ public class MarginAccountService {
     public void withdraw(Long marginAccountId, BigDecimal amount, Authentication authentication) {
 
         // double check for client role (already checked in global security config)
-        boolean client = false;
-        for (GrantedAuthority authority : authentication.getAuthorities()) {
-            if (authority.getAuthority() != null && authority.getAuthority().contains("CLIENT")) {
-                client = true;
-                break;
-            }
-        }
-        if (!client)
+
+        if (notClient(authentication))
             throw new IllegalStateException("Access denied.");
 
         User user = userRepository.findByEmail(authentication.getName()).orElseThrow(
@@ -193,11 +236,14 @@ public class MarginAccountService {
         marginAccountRepository.save(marginAccount);
 
         // 6. create new Transaction (type = WITHDRAWAL)
+        String transactionDescription =
+                "Executed transaction. Amount withdrawn: " + amount + ". Current balance: " + updatedInitialMargin + ".";
+
         MarginTransaction marginTransaction = MarginTransaction.builder()
                 .marginAccount(marginAccount)
                 .type(MarginTransactionType.WITHDRAWAL)
                 .amount(amount)
-                .description("Withdrawal transaction. Amout: " + amount + ", current balance: " + updatedInitialMargin)
+                .description(transactionDescription)
                 .build();
 
         // 7. save margin transaction
@@ -283,4 +329,14 @@ public class MarginAccountService {
                 .createdAt(transaction.getCreatedAt())
                 .build();
     }
+
+
+    private boolean notClient(Authentication authentication) {
+        for (GrantedAuthority authority : authentication.getAuthorities()) {
+            if (authority.getAuthority() != null && authority.getAuthority().contains("CLIENT"))
+                return false;
+        }
+        return true;
+    }
+
 }

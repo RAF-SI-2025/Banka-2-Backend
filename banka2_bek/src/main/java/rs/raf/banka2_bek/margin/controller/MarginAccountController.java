@@ -107,7 +107,7 @@ public class MarginAccountController {
             @RequestBody Map<String, BigDecimal> body,
             Authentication authentication) {
         BigDecimal amount = body.get("amount");
-        marginAccountService.deposit(id, amount);
+        marginAccountService.deposit(id, amount, authentication);
         return ResponseEntity.ok(Map.of("message", "Deposit successful"));
     }
 
