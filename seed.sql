@@ -334,6 +334,15 @@ VALUES
 
     ON DUPLICATE KEY UPDATE account_number = account_number;
 
+    INSERT INTO margin_accounts (account_id, user_id, initial_margin, loan_value, maintenance_margin, bank_participation, status, created_at)
+
+    VALUES
+        -- Stefan Jovanovic (id = 1) 4. racun - margin
+
+        (1, 1, 30000.0000, 15000.0000,
+        15000.0000, 0.5000, 'ACTIVE', NOW());
+
+    ON DUPLICATE KEY UPDATE account_number = account_number;
 
 -- ============================================================
 -- BANK ACCOUNTS (Banka kao entitet — racuni u svim valutama)
