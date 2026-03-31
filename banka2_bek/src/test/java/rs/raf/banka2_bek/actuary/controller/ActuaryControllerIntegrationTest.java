@@ -488,6 +488,7 @@ class ActuaryControllerIntegrationTest {
                 .permissions(Set.of("SUPERVISOR"))
                 .build());
 
+
         actuaryInfoRepository.save(createActuaryInfo(
                 otherSupervisor,
                 ActuaryType.SUPERVISOR,
