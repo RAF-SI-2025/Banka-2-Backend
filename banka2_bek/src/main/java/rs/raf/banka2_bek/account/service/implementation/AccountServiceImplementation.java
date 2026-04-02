@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
-import rs.raf.banka2_bek.notification.listener.AccountCreatedEvent;
+import rs.raf.banka2_bek.account.event.AccountCreatedEvent;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;

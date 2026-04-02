@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.notification.listener;
+package rs.raf.banka2_bek.account.event;
 
 import lombok.Getter;
 

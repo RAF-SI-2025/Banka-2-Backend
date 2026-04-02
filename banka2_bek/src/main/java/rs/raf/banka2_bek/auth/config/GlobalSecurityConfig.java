@@ -77,6 +77,8 @@ public class GlobalSecurityConfig  {
                         .requestMatchers(HttpMethod.PATCH, "/exchanges/*/test-mode").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/options", "/options/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/options/*/exercise", "/options/generate").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/margin-accounts/*/withdraw").hasRole("CLIENT")
+                        .requestMatchers(HttpMethod.POST, "/margin-accounts/*/deposit").hasRole("CLIENT")
                         .requestMatchers("/margin-accounts/**").authenticated()
                         .anyRequest().authenticated()
                 )

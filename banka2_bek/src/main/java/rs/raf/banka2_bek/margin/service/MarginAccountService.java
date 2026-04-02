@@ -1,16 +1,21 @@
 package rs.raf.banka2_bek.margin.service;
 
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.account.model.AccountStatus;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.margin.dto.CreateMarginAccountDto;
+import rs.raf.banka2_bek.margin.dto.MarginAccountCheckDto;
 import rs.raf.banka2_bek.margin.dto.MarginAccountDto;
 import rs.raf.banka2_bek.margin.dto.MarginTransactionDto;
+import rs.raf.banka2_bek.margin.event.MarginAccountBlockedEvent;
 import rs.raf.banka2_bek.margin.model.MarginAccount;
 import rs.raf.banka2_bek.margin.model.MarginAccountStatus;
 import rs.raf.banka2_bek.margin.model.MarginTransaction;
@@ -24,14 +29,14 @@ import java.util.List;
 
 /**
  * Servis za upravljanje margin racunima.
- *
+ * <p>
  * Specifikacija: Celina 3 - Margin racuni
- *
+ * <p>
  * Kljucne formule:
- *   initialMargin     = deposit / (1 - bankParticipation)
- *   loanValue          = initialMargin - deposit
- *   maintenanceMargin  = initialMargin * 0.5  (za akcije)
- *
+ * initialMargin     = deposit / (1 - bankParticipation)
+ * loanValue          = initialMargin - deposit
+ * maintenanceMargin  = initialMargin * 0.5  (za akcije)
+ * <p>
  * Margin call: ako initialMargin padne ispod maintenanceMargin, racun se blokira.
  */
 @Service
@@ -43,18 +48,23 @@ public class MarginAccountService {
     private final MarginTransactionRepository marginTransactionRepository;
     private final AccountRepository accountRepository;
     private final ClientRepository clientRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    /** Podrazumevani procenat ucestva banke (50%) */
+    /**
+     * Podrazumevani procenat ucestva banke (50%)
+     */
     private static final BigDecimal DEFAULT_BANK_PARTICIPATION = new BigDecimal("0.50");
 
-    /** Faktor za izracunavanje maintenance margine (50% od initial za akcije) */
+    /**
+     * Faktor za izracunavanje maintenance margine (50% od initial za akcije)
+     */
     private static final BigDecimal MAINTENANCE_FACTOR = new BigDecimal("0.50");
 
     /**
      * Kreira novi margin racun za korisnika.
      *
      * @param userId ID korisnika koji kreira margin racun
-     * @param dto DTO sa accountId i initialDeposit
+     * @param dto    DTO sa accountId i initialDeposit
      * @return kreiran MarginAccountDto
      */
     @Transactional
@@ -155,82 +165,193 @@ public class MarginAccountService {
     /**
      * Uplata sredstava na margin racun.
      *
-     * TODO: Implementirati logiku:
-     *   1. Pronaci MarginAccount po ID-ju, baciti exception ako ne postoji
-     *   2. Dodati amount na initialMargin
-     *   3. Preracunati maintenanceMargin = initialMargin * MAINTENANCE_FACTOR
-     *   4. Ako je racun bio BLOCKED i sada initialMargin >= maintenanceMargin:
-     *      - Promeniti status na ACTIVE
-     *      - Logirati "Margin account {} unblocked after deposit of {}"
-     *   5. Sacuvati MarginAccount
-     *   6. Kreirati DEPOSIT MarginTransaction
-     *   7. Sacuvati MarginTransaction
-     *
      * @param marginAccountId ID margin racuna
-     * @param amount iznos za uplatu
+     * @param amount          iznos za uplatu
      */
     @Transactional
-    public void deposit(Long marginAccountId, BigDecimal amount) {
-        // TODO: Implement deposit logic with margin recalculation
+    public void deposit(Long marginAccountId, BigDecimal amount, Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated())
+            throw new IllegalStateException("Not authenticated.");
+
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) < 1)
+            throw new IllegalArgumentException("Amount must be a positive number.");
+
+        Long clientId = clientRepository.findByEmail(authentication.getName()).orElseThrow(
+                () -> new EntityNotFoundException("Only clients can deposit on margin accounts.")
+        ).getId();
+
+        // 1. find MarginAccount by id
+        MarginAccount account = marginAccountRepository.findById(marginAccountId)
+                .orElseThrow(
+                        () -> new EntityNotFoundException("Account with id: " + marginAccountId + " not found.")
+                );
+
+        // OWNERSHIP CHECK
+        if (!clientId.equals(account.getUserId()))
+            throw new IllegalStateException("Only the owner of margin account with id = " + marginAccountId + " can deposit funds.");
+
+
+        // 2. increase initialMargin for the amount
+        account.setInitialMargin(account.getInitialMargin().add(amount));
+
+        // 3. set new maintenanceMargin = initialMargin * MAINTENANCE_FACTOR
+        account.setMaintenanceMargin(account.getInitialMargin().multiply(MAINTENANCE_FACTOR));
+
+        // 4. if account could be unblocked -> activate it
+        boolean isBlocked = account.getStatus().equals(MarginAccountStatus.BLOCKED);
+        if (isBlocked) account.setStatus(MarginAccountStatus.ACTIVE);
+
+        // 5. save marginAccount
+        marginAccountRepository.save(account);
+
+        String transactionDescription =
+                "Executed transaction. Amount deposited: " + amount + ". Current balance: " + account.getInitialMargin() + ".";
+
+        // 6. create Transaction (type = DEPOSIT)
+        MarginTransaction transaction = MarginTransaction.builder()
+                .marginAccount(account)
+                .type(MarginTransactionType.DEPOSIT)
+                .amount(amount)
+                .description(transactionDescription)
+                .build();
+
+        // 7. save Transaction
+        marginTransactionRepository.save(transaction);
+
         log.info("Deposit {} to margin account {}", amount, marginAccountId);
     }
 
     /**
      * Isplata sredstava sa margin racuna.
      *
-     * TODO: Implementirati logiku:
-     *   1. Pronaci MarginAccount po ID-ju, baciti exception ako ne postoji
-     *   2. Proveriti da je racun ACTIVE (blokirani racuni ne dozvoljavaju isplate)
-     *   3. Proveriti: initialMargin - amount >= maintenanceMargin
-     *      - Ako nije, baciti exception "Isplata bi smanjila marginu ispod maintenance nivoa"
-     *   4. Smanjiti initialMargin za amount
-     *   5. Sacuvati MarginAccount
-     *   6. Kreirati WITHDRAWAL MarginTransaction
-     *   7. Sacuvati MarginTransaction
-     *
      * @param marginAccountId ID margin racuna
-     * @param amount iznos za isplatu
+     * @param amount          iznos za isplatu
      */
     @Transactional
-    public void withdraw(Long marginAccountId, BigDecimal amount) {
-        // TODO: Implement withdrawal logic with maintenance margin check
+    public void withdraw(Long marginAccountId, BigDecimal amount, Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated())
+            throw new IllegalStateException("Not authenticated.");
+
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) < 1)
+            throw new IllegalArgumentException("Amount must be a positive number.");
+
+
+        Long clientId = clientRepository.findByEmail(authentication.getName()).orElseThrow(
+                () -> new IllegalStateException("Only clients can withdraw from margin accounts.")
+        ).getId();
+
+        // 1. find MarginAccount by marginAccountId, if it doesn't exist exception is thrown
+        MarginAccount account = marginAccountRepository.findById(marginAccountId).orElseThrow(
+                () -> new EntityNotFoundException("Account with id: " + marginAccountId + " not found.")
+        );
+
+        // CHECK ACCOUNT OWNERSHIP
+        if (!clientId.equals(account.getUserId()))
+            throw new IllegalStateException("Only the owner of margin account with id = " + marginAccountId + " can withdraw funds.");
+
+        // 2. not active accounts can't do withdraw
+        if (!account.getStatus().equals(MarginAccountStatus.ACTIVE))
+            throw new IllegalStateException("Account with id: " + marginAccountId + " is not active.");
+
+        // 3. is initial_margin - amount < maintenance_margin  <==>  initialMargin - amount >= maintenanceMargin
+        boolean withdrawalBelowMaintenance =
+                account.getInitialMargin().subtract(amount).compareTo(account.getMaintenanceMargin()) < 0;
+
+        // if dropped below maintenance
+        if (withdrawalBelowMaintenance)
+            throw new IllegalArgumentException(
+                    "Funds in the account cannot be below " + account.getMaintenanceMargin() + " amount."
+            );
+
+        // 4. update initialMargin = initialMargin - amount
+
+        account.setInitialMargin(account.getInitialMargin().subtract(amount));
+
+        account.setMaintenanceMargin(account.getInitialMargin().multiply(MAINTENANCE_FACTOR));
+
+        // 5. save margin account
+        marginAccountRepository.save(account);
+
+        // 6. create new Transaction (type = WITHDRAWAL)
+        String description = "Executed transaction. Amount withdrawn: " + amount + ". Current balance: " + account.getInitialMargin() + ".";
+
+        MarginTransaction transaction = MarginTransaction.builder()
+                .marginAccount(account)
+                .type(MarginTransactionType.WITHDRAWAL)
+                .amount(amount)
+                .description(description)
+                .build();
+
+        // 7. save margin transaction
+        marginTransactionRepository.save(transaction);
+
         log.info("Withdraw {} from margin account {}", amount, marginAccountId);
     }
 
     /**
      * Dnevna provera maintenance margine za sve aktivne margin racune.
      * Pokrece se automatski svaki dan u ponoc.
-     *
-     * TODO: Implementirati logiku:
-     *   1. Dohvatiti sve margin racune sa statusom ACTIVE
-     *   2. Za svaki racun proveriti: da li je initialMargin < maintenanceMargin?
-     *   3. Ako jeste — margin call:
-     *      - Postaviti status na BLOCKED
-     *      - Sacuvati racun
-     *      - Logirati "MARGIN CALL: Account {} blocked. initialMargin={}, maintenanceMargin={}"
-     *   4. Na kraju logirati ukupan broj blokiranih racuna
+     * <p>
+     * TODO: Implementirati logiku
      *   5. TODO (buducnost): Poslati email notifikaciju korisniku o margin call-u
      */
     @Scheduled(cron = "0 0 0 * * *")
     @Transactional
     public void checkMaintenanceMargin() {
-        // TODO: Implement margin call logic for all active accounts
+
         log.info("Running daily maintenance margin check...");
+
+        // get all about to be blocked accounts
+        List<MarginAccountCheckDto> accountsForBlocking = marginAccountRepository.findAccountsForMarginCheck(MarginAccountStatus.ACTIVE.toString());
+
+        marginAccountRepository.blockAccountsWhereMaintenanceExceedsInitial(MarginAccountStatus.BLOCKED.toString());
+
+        for (MarginAccountCheckDto account : accountsForBlocking) {
+
+            // for mail sending logic listen for MarginAccountBlockedEvent publish
+            eventPublisher.publishEvent(
+                    new MarginAccountBlockedEvent(
+                            account.ownerEmail(),
+                            account.maintenanceMargin().toString(),
+                            account.initialMargin().toString(),
+                            account.calculateMaintenanceDeficit().toString()
+                    )
+            );
+
+            log.warn(
+                    "MARGIN CALL: Account {} blocked. initialMargin={}, maintenanceMargin={}",
+                    account.marginAccountId(),
+                    account.initialMargin(),
+                    account.maintenanceMargin()
+            );
+        }
+
+        log.info("Daily maintenance margin check completed. Amount of blocked accounts : {}.", accountsForBlocking.size());
+
     }
 
     /**
      * Vraca istoriju transakcija za dati margin racun.
      *
-     * TODO: Implementirati logiku:
-     *   1. Proveriti da margin racun postoji
-     *   2. Dohvatiti sve transakcije (findByMarginAccountIdOrderByCreatedAtDesc)
-     *   3. Mapirati u listu MarginTransactionDto
-     *
      * @param marginAccountId ID margin racuna
      * @return lista transakcija sortirana od najnovije
      */
-    public List<MarginTransactionDto> getTransactions(Long marginAccountId) {
-        // TODO: Validate account access before returning transactions
+    public List<MarginTransactionDto> getTransactions(Long marginAccountId, Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated())
+            throw new IllegalStateException("Not authenticated.");
+
+        Long clientId = clientRepository.findByEmail(authentication.getName()).orElseThrow(
+                () -> new IllegalStateException("Only clients can get the list of margin transactions.")
+        ).getId();
+
+        MarginAccount marginAccount = marginAccountRepository.findById(marginAccountId).orElseThrow(
+                () -> new EntityNotFoundException("Margin account with id: " + marginAccountId + " does not exist.")
+        );
+
+        // CHECK ACCOUNT OWNERSHIP
+        if (!marginAccount.getUserId().equals(clientId))
+            throw new IllegalStateException("Only the owner of the margin account with id = " + marginAccountId + " can access margin account transactions.");
+
         return marginTransactionRepository.findByMarginAccountIdOrderByCreatedAtDesc(marginAccountId)
                 .stream()
                 .map(this::toDto)
@@ -267,4 +388,6 @@ public class MarginAccountService {
                 .createdAt(transaction.getCreatedAt())
                 .build();
     }
+
+
 }

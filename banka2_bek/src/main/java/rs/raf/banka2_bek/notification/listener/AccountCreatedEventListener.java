@@ -3,6 +3,7 @@ package rs.raf.banka2_bek.notification.listener;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import rs.raf.banka2_bek.account.event.AccountCreatedEvent;
 import rs.raf.banka2_bek.notification.service.MailNotificationService;
 
 @Component
