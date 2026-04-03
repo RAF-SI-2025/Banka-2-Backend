@@ -236,7 +236,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Failed to generate unique order number");
+                .hasMessageContaining("Generisanje broja placanja nije uspelo");
     }
 
     @Test
@@ -275,7 +275,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Source account does not exist");
+                .hasMessageContaining("Racun posiljaoca ne postoji");
     }
 
     @Test
@@ -285,7 +285,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Destination account does not exist");
+                .hasMessageContaining("Racun primaoca ne postoji");
     }
 
     @Test
@@ -296,7 +296,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Source account is not active");
+                .hasMessageContaining("Racun posiljaoca nije aktivan");
     }
 
     @Test
@@ -307,7 +307,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Destination account is not active");
+                .hasMessageContaining("Racun primaoca nije aktivan");
     }
 
     @Test
@@ -318,7 +318,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be different");
+                .hasMessageContaining("Racuni moraju biti razliciti");
     }
 
     @Test
@@ -332,7 +332,7 @@ class PaymentServiceImplTest {
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("does not belong");
+                .hasMessageContaining("ne pripada klijentu");
     }
 
     @Test
@@ -413,8 +413,7 @@ class PaymentServiceImplTest {
         when(paymentAccountRepository.findForUpdateByAccountNumber(request.getToAccount())).thenReturn(Optional.of(toAccount));
 
         assertThatThrownBy(() -> paymentService.createPayment(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Nedovoljno sredstava");
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test

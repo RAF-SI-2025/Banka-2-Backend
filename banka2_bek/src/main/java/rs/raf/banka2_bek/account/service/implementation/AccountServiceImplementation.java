@@ -195,7 +195,7 @@ public class AccountServiceImplementation implements AccountService {
 
         // Auto-create card if requested
         if (Boolean.TRUE.equals(request.getCreateCard()) && client != null) {
-            cardService.createCardForAccount(account.getId(), client.getId(), null);
+            cardService.createCardForAccount(account.getId(), client.getId(), null, null);
         }
 
         // Send email notification

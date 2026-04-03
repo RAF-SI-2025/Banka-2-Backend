@@ -15,6 +15,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Servis za upravljanje berzama i proveru radnog vremena.
@@ -30,7 +31,7 @@ public class ExchangeManagementService {
 
     /**
      * Proverava da li je berza trenutno otvorena.
-     * Praznici se trenutno ne uzimaju u obzir (samo radni dan + lokalno vreme u open/close intervalu).
+     * Uzima u obzir vikende, praznike i radno vreme u lokalnoj vremenskoj zoni berze.
      */
     public boolean isExchangeOpen(String acronym) {
         Exchange exchange = exchangeRepository.findByAcronym(acronym)
@@ -39,8 +40,7 @@ public class ExchangeManagementService {
             return true;
         }
         ZonedDateTime nowZ = nowInExchangeZone(exchange);
-        DayOfWeek dow = nowZ.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+        if (isNonTradingDay(nowZ, exchange)) {
             return false;
         }
         LocalTime now = nowZ.toLocalTime();
@@ -54,6 +54,17 @@ public class ExchangeManagementService {
      */
     ZonedDateTime nowInExchangeZone(Exchange exchange) {
         return ZonedDateTime.now(ZoneId.of(exchange.getTimeZone()));
+    }
+
+    /**
+     * Proverava da li je dati datum vikend ili praznik za berzu.
+     */
+    private boolean isNonTradingDay(ZonedDateTime dateTime, Exchange exchange) {
+        DayOfWeek dow = dateTime.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+            return true;
+        }
+        return exchange.getHolidays() != null && exchange.getHolidays().contains(dateTime.toLocalDate());
     }
 
     private static boolean isWithinTradingHours(LocalTime now, LocalTime open, LocalTime close) {
@@ -95,7 +106,7 @@ public class ExchangeManagementService {
 
     /**
      * Proverava da li je berza u after-hours periodu (posle regularnog closeTime, do postMarketCloseTime).
-     * Bez postMarketCloseTime nema after-hours prozora. Vikend: uvek false.
+     * Bez postMarketCloseTime nema after-hours prozora. Vikend i praznici: uvek false.
      * Test mode ne menja after-hours proveru (može biti i true i false po satu).
      */
     public boolean isAfterHours(String acronym) {
@@ -106,8 +117,7 @@ public class ExchangeManagementService {
             return false;
         }
         ZonedDateTime nowZ = nowInExchangeZone(exchange);
-        DayOfWeek dow = nowZ.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+        if (isNonTradingDay(nowZ, exchange)) {
             return false;
         }
         LocalTime now = nowZ.toLocalTime();
@@ -120,9 +130,7 @@ public class ExchangeManagementService {
 
     /**
      * Racuna kada se berza sledeci put otvara (ISO 8601 string).
-     * - Radni dan pre openTime: danas u openTime
-     * - Radni dan posle openTime (zatvorena posle closeTime): sledeci radni dan u openTime
-     * - Vikend: ponedeljak u openTime
+     * Uzima u obzir vikende i praznike — preskace neradne dane dok ne nadje prvi radni dan.
      */
     private String calculateNextOpenTime(Exchange exchange) {
         LocalTime openTime = exchange.getOpenTime();
@@ -132,30 +140,78 @@ public class ExchangeManagementService {
 
         ZoneId zone = ZoneId.of(exchange.getTimeZone());
         ZonedDateTime nowZ = nowInExchangeZone(exchange);
-        DayOfWeek dow = nowZ.getDayOfWeek();
         LocalTime now = nowZ.toLocalTime();
 
-        LocalDate nextOpenDate;
-        if (dow == DayOfWeek.SATURDAY) {
-            nextOpenDate = nowZ.toLocalDate().plusDays(2); // Monday
-        } else if (dow == DayOfWeek.SUNDAY) {
-            nextOpenDate = nowZ.toLocalDate().plusDays(1); // Monday
-        } else if (now.isBefore(openTime)) {
-            // Weekday, before opening
-            nextOpenDate = nowZ.toLocalDate();
+        LocalDate candidate;
+        if (!isNonTradingDay(nowZ, exchange) && now.isBefore(openTime)) {
+            // Radni dan pre otvaranja — berza se otvara danas
+            candidate = nowZ.toLocalDate();
         } else {
-            // Weekday, after closing — next weekday
-            nextOpenDate = nowZ.toLocalDate().plusDays(1);
-            DayOfWeek nextDow = nextOpenDate.getDayOfWeek();
-            if (nextDow == DayOfWeek.SATURDAY) {
-                nextOpenDate = nextOpenDate.plusDays(2);
-            } else if (nextDow == DayOfWeek.SUNDAY) {
-                nextOpenDate = nextOpenDate.plusDays(1);
-            }
+            // Kreni od sutra i nadji prvi radni dan koji nije praznik
+            candidate = nowZ.toLocalDate().plusDays(1);
         }
 
-        ZonedDateTime nextOpen = nextOpenDate.atTime(openTime).atZone(zone);
+        // Preskoci vikende i praznike (max 365 dana kao sigurnosni limit)
+        int safetyCounter = 0;
+        while (safetyCounter < 365) {
+            DayOfWeek dow = candidate.getDayOfWeek();
+            boolean isWeekend = dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY;
+            boolean isHoliday = exchange.getHolidays() != null && exchange.getHolidays().contains(candidate);
+            if (!isWeekend && !isHoliday) {
+                break;
+            }
+            candidate = candidate.plusDays(1);
+            safetyCounter++;
+        }
+
+        ZonedDateTime nextOpen = candidate.atTime(openTime).atZone(zone);
         return nextOpen.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+    }
+
+    /**
+     * Vraca praznike za berzu po skracenici.
+     */
+    public Set<LocalDate> getHolidays(String acronym) {
+        Exchange exchange = exchangeRepository.findByAcronym(acronym)
+                .orElseThrow(() -> new RuntimeException("Exchange not found: " + acronym));
+        return exchange.getHolidays();
+    }
+
+    /**
+     * Postavlja praznike za berzu (zamenjuje postojece).
+     */
+    @Transactional
+    public void setHolidays(String acronym, Set<LocalDate> holidays) {
+        Exchange exchange = exchangeRepository.findByAcronym(acronym)
+                .orElseThrow(() -> new RuntimeException("Exchange not found: " + acronym));
+        exchange.getHolidays().clear();
+        exchange.getHolidays().addAll(holidays);
+        exchangeRepository.save(exchange);
+        log.info("Set {} holidays for exchange {}", holidays.size(), acronym);
+    }
+
+    /**
+     * Dodaje praznik za berzu.
+     */
+    @Transactional
+    public void addHoliday(String acronym, LocalDate date) {
+        Exchange exchange = exchangeRepository.findByAcronym(acronym)
+                .orElseThrow(() -> new RuntimeException("Exchange not found: " + acronym));
+        exchange.getHolidays().add(date);
+        exchangeRepository.save(exchange);
+        log.info("Added holiday {} for exchange {}", date, acronym);
+    }
+
+    /**
+     * Uklanja praznik za berzu.
+     */
+    @Transactional
+    public void removeHoliday(String acronym, LocalDate date) {
+        Exchange exchange = exchangeRepository.findByAcronym(acronym)
+                .orElseThrow(() -> new RuntimeException("Exchange not found: " + acronym));
+        exchange.getHolidays().remove(date);
+        exchangeRepository.save(exchange);
+        log.info("Removed holiday {} for exchange {}", date, acronym);
     }
 
     // ── Helper metode ───────────────────────────────────────────────────────────
@@ -187,6 +243,7 @@ public class ExchangeManagementService {
                 .isCurrentlyOpen(open)
                 .currentLocalTime(currentLocalTime)
                 .nextOpenTime(open ? null : calculateNextOpenTime(exchange))
+                .holidays(exchange.getHolidays())
                 .build();
     }
 }

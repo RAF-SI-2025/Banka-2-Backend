@@ -13,6 +13,7 @@ import rs.raf.banka2_bek.card.dto.CardResponseDto;
 import rs.raf.banka2_bek.card.dto.CreateCardRequestDto;
 import rs.raf.banka2_bek.card.model.Card;
 import rs.raf.banka2_bek.card.model.CardStatus;
+import rs.raf.banka2_bek.card.model.CardType;
 import rs.raf.banka2_bek.card.repository.CardRepository;
 import rs.raf.banka2_bek.card.service.CardService;
 import rs.raf.banka2_bek.client.model.Client;
@@ -45,24 +46,26 @@ public class CardServiceImpl implements CardService {
             throw new RuntimeException("Nemate pristup ovom racunu");
         }
 
-        checkCardLimit(account);
+        checkCardLimit(account, client);
 
         BigDecimal limit = request.getCardLimit() != null ? request.getCardLimit() : BigDecimal.valueOf(100000);
-        return toResponse(createAndSaveCard(account, client, limit));
+        CardType cardType = request.getCardType() != null ? request.getCardType() : CardType.VISA;
+        return toResponse(createAndSaveCard(account, client, limit, cardType));
     }
 
     @Override
     @Transactional
-    public CardResponseDto createCardForAccount(Long accountId, Long clientId, BigDecimal limit) {
+    public CardResponseDto createCardForAccount(Long accountId, Long clientId, BigDecimal limit, CardType cardType) {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Racun nije pronadjen"));
         Client client = clientRepository.findById(clientId)
                 .orElseThrow(() -> new RuntimeException("Klijent nije pronadjen"));
 
-        checkCardLimit(account);
+        checkCardLimit(account, client);
 
         BigDecimal cardLimit = limit != null ? limit : BigDecimal.valueOf(100000);
-        return toResponse(createAndSaveCard(account, client, cardLimit));
+        CardType type = cardType != null ? cardType : CardType.VISA;
+        return toResponse(createAndSaveCard(account, client, cardLimit, type));
     }
 
     @Override
@@ -167,24 +170,35 @@ public class CardServiceImpl implements CardService {
 
     // --- helpers ---
 
-    private void checkCardLimit(Account account) {
-        long activeCards = cardRepository.countByAccountIdAndStatusNot(account.getId(), CardStatus.DEACTIVATED);
+    private void checkCardLimit(Account account, Client client) {
         boolean isBusiness = account.getAccountType() == AccountType.BUSINESS;
-        long maxCards = isBusiness ? 1 : 2;
-        if (activeCards >= maxCards) {
-            throw new RuntimeException("Dostignut maksimalan broj kartica za ovaj racun (" + maxCards + ")");
+
+        if (isBusiness) {
+            // Poslovni racun: max 1 kartica po ovlascenom licu (klijentu)
+            long activeCardsForPerson = cardRepository.countByAccountIdAndClientIdAndStatusNot(
+                    account.getId(), client.getId(), CardStatus.DEACTIVATED);
+            if (activeCardsForPerson >= 1) {
+                throw new RuntimeException("Ovlasceno lice vec ima karticu za ovaj poslovni racun (max 1 po osobi)");
+            }
+        } else {
+            // Licni racun: max 2 kartice ukupno
+            long activeCards = cardRepository.countByAccountIdAndStatusNot(account.getId(), CardStatus.DEACTIVATED);
+            if (activeCards >= 2) {
+                throw new RuntimeException("Dostignut maksimalan broj kartica za ovaj racun (2)");
+            }
         }
     }
 
-    private Card createAndSaveCard(Account account, Client client, BigDecimal limit) {
+    private Card createAndSaveCard(Account account, Client client, BigDecimal limit, CardType cardType) {
         String cardNumber;
         do {
-            cardNumber = Card.generateCardNumber();
+            cardNumber = Card.generateCardNumber(cardType);
         } while (cardRepository.findByCardNumber(cardNumber).isPresent());
 
         Card card = Card.builder()
                 .cardNumber(cardNumber)
-                .cardName("Visa Debit")
+                .cardName(resolveCardName(cardType))
+                .cardType(cardType)
                 .cvv(Card.generateCvv())
                 .account(account)
                 .client(client)
@@ -197,12 +211,22 @@ public class CardServiceImpl implements CardService {
         return cardRepository.save(card);
     }
 
+    private String resolveCardName(CardType cardType) {
+        return switch (cardType) {
+            case VISA -> "Visa Debit";
+            case MASTERCARD -> "MasterCard Debit";
+            case DINACARD -> "DinaCard Debit";
+            case AMERICAN_EXPRESS -> "American Express";
+        };
+    }
+
     private CardResponseDto toResponse(Card card) {
         return CardResponseDto.builder()
                 .id(card.getId())
                 .cardNumber(card.getCardNumber())
                 .cardName(card.getCardName())
                 .cvv(card.getCvv())
+                .cardType(card.getCardType())
                 .accountId(card.getAccount().getId())
                 .accountNumber(card.getAccount().getAccountNumber())
                 .ownerName(card.getClient().getFirstName() + " " + card.getClient().getLastName())
@@ -219,6 +243,7 @@ public class CardServiceImpl implements CardService {
                 .cardNumber(maskCardNumber(card.getCardNumber()))
                 .cardName(card.getCardName())
                 .cvv(null)
+                .cardType(card.getCardType())
                 .accountId(card.getAccount().getId())
                 .accountNumber(card.getAccount().getAccountNumber())
                 .ownerName(card.getClient().getFirstName() + " " + card.getClient().getLastName())

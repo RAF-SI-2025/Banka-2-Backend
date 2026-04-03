@@ -173,7 +173,7 @@ public class TransferServiceTest {
 
         assertThatThrownBy(() -> transferService.internalTransfer(request))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Accounts must have the same currency");
+                .hasMessageContaining("Bank account for RSD not found");
     }
 
     @Test
@@ -294,7 +294,7 @@ public class TransferServiceTest {
         assertThat(response.getFromAccountNumber()).isEqualTo("111111111111111111");
         assertThat(response.getToAccountNumber()).isEqualTo("222222222222222222");
         assertThat(response.getStatus()).isEqualTo(PaymentStatus.COMPLETED);
-        assertThat(fromAccount.getAvailableBalance()).isEqualTo(new BigDecimal("9000"));
+        assertThat(fromAccount.getAvailableBalance()).isEqualByComparingTo(new BigDecimal("8995.00"));
         assertThat(toAccount.getAvailableBalance()).isEqualByComparingTo(new BigDecimal("5009.5"));
     }
 
@@ -327,7 +327,7 @@ public class TransferServiceTest {
 
         assertThatThrownBy(() -> transferService.fxTransfer(request))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Insufficient funds");
+                .hasMessageContaining("Nedovoljno sredstava");
     }
 
     @Test

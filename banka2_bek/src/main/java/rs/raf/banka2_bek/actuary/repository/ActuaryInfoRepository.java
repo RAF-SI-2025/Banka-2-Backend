@@ -1,6 +1,7 @@
 package rs.raf.banka2_bek.actuary.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -31,4 +32,12 @@ public interface ActuaryInfoRepository extends JpaRepository<ActuaryInfo, Long> 
     );
 
     Optional<ActuaryInfo> findByEmployee_Email(String username);
+
+    /**
+     * Resetuje usedLimit na 0 za sve aktuare u jednom bulk UPDATE upitu.
+     * Vraca broj azuriranih redova.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE ActuaryInfo a SET a.usedLimit = 0")
+    int resetAllUsedLimits();
 }

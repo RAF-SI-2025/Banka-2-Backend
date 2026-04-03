@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +30,7 @@ public class EmployeeController {
             @ApiResponse(responseCode = "201", description = "Employee created", content = @Content(schema = @Schema(implementation = EmployeeResponseDto.class))),
             @ApiResponse(responseCode = "400", description = "Validation error or duplicate email/username")
     })
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ResponseEntity<EmployeeResponseDto> createEmployee(@Valid @RequestBody CreateEmployeeRequestDto request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(employeeService.createEmployee(request));
@@ -38,6 +40,7 @@ public class EmployeeController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Page of employees (content: array of EmployeeResponseDto, totalElements, totalPages, etc.)")
     })
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
     @GetMapping
     public ResponseEntity<Page<EmployeeResponseDto>> getEmployees(
             @Parameter(description = "Page index (0-based)") @RequestParam(defaultValue = "0") int page,
@@ -54,6 +57,7 @@ public class EmployeeController {
             @ApiResponse(responseCode = "200", description = "Employee found", content = @Content(schema = @Schema(implementation = EmployeeResponseDto.class))),
             @ApiResponse(responseCode = "404", description = "Employee not found")
     })
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
     @GetMapping("/{id}")
     public ResponseEntity<EmployeeResponseDto> getEmployeeById(
             @Parameter(description = "Employee ID") @PathVariable Long id) {
@@ -66,6 +70,7 @@ public class EmployeeController {
             @ApiResponse(responseCode = "400", description = "Validation error"),
             @ApiResponse(responseCode = "404", description = "Employee not found")
     })
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<EmployeeResponseDto> updateEmployee(
             @Parameter(description = "Employee ID") @PathVariable Long id,
@@ -79,6 +84,7 @@ public class EmployeeController {
             @ApiResponse(responseCode = "400", description = "Already deactivated"),
             @ApiResponse(responseCode = "404", description = "Employee not found")
     })
+    @PreAuthorize("hasRole('ADMIN')")
     @PatchMapping("/{id}/deactivate")
     public ResponseEntity<Void> deactivateEmployee(
             @Parameter(description = "Employee ID") @PathVariable Long id) {

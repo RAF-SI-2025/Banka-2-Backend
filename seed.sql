@@ -355,6 +355,15 @@ VALUES
      NULL, 1, NOW())
     ON DUPLICATE KEY UPDATE name = name;
 
+-- Država (Republika Srbija) — poseban entitet za uplatu poreza
+INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
+                       majority_owner_id, active, is_state, created_at)
+VALUES
+    (4, 'Republika Srbija', '17858459', '100002288', '84.11',
+     'Nemanjina 11, Beograd',
+     NULL, 1, 1, NOW())
+    ON DUPLICATE KEY UPDATE name = name;
+
 -- Bankini racuni u svim valutama
 INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
                       client_id, company_id, employee_id,
@@ -395,6 +404,19 @@ VALUES
      5000000.0000, 5000000.0000, 999999999.0000, 999999999.0000,
      0.0000, 0.0000, 0.0000, '2050-01-01', 'ACTIVE', 'Banka AUD', NOW())
 
+    ON DUPLICATE KEY UPDATE account_number = account_number;
+
+-- Tekuci dinarski racun drzave (za uplatu poreza)
+INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
+                      client_id, company_id, employee_id,
+                      balance, available_balance,
+                      daily_limit, monthly_limit,
+                      daily_spending, monthly_spending,
+                      maintenance_fee, expiration_date, status, name, created_at)
+VALUES
+    ('222000100000000200', 'CHECKING', 'STANDARD', 8, NULL, 4, 1,
+     0.0000, 0.0000, 999999999.0000, 999999999.0000,
+     0.0000, 0.0000, 0.0000, '2050-01-01', 'ACTIVE', 'Republika Srbija - poreski racun', NOW())
     ON DUPLICATE KEY UPDATE account_number = account_number;
 
 

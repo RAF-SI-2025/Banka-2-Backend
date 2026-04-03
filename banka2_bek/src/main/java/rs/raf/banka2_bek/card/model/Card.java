@@ -21,7 +21,7 @@ public class Card {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 16)
+    @Column(nullable = false, unique = true, length = 19)
     private String cardNumber;
 
     @Column(nullable = false, length = 30)
@@ -41,6 +41,11 @@ public class Card {
     @Column(nullable = false, precision = 19, scale = 4)
     @Builder.Default
     private BigDecimal cardLimit = BigDecimal.ZERO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private CardType cardType = CardType.VISA;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 15)
@@ -70,16 +75,59 @@ public class Card {
         return sum % 10 == 0;
     }
 
-    public static String generateCardNumber() {
+    /**
+     * Generates a valid card number for the given card type.
+     * VISA: 16 digits, prefix 4XXXXX
+     * MASTERCARD: 16 digits, prefix 51-55
+     * DINACARD: 16 digits, prefix 9891
+     * AMERICAN_EXPRESS: 15 digits, prefix 34 or 37
+     * The last digit is always the Luhn check digit.
+     */
+    public static String generateCardNumber(CardType cardType) {
         java.util.Random random = new java.util.Random();
-        // Visa-style: starts with 4, bank identifier 22200
-        String prefix = "422200";
+
+        String prefix;
+        int totalDigits;
+
+        switch (cardType) {
+            case MASTERCARD:
+                // 51-55 range
+                prefix = "5" + (random.nextInt(5) + 1);
+                totalDigits = 16;
+                break;
+            case DINACARD:
+                prefix = "9891";
+                totalDigits = 16;
+                break;
+            case AMERICAN_EXPRESS:
+                // 34 or 37
+                prefix = random.nextBoolean() ? "34" : "37";
+                totalDigits = 15;
+                break;
+            case VISA:
+            default:
+                prefix = "422200";
+                totalDigits = 16;
+                break;
+        }
+
         StringBuilder sb = new StringBuilder(prefix);
-        for (int i = prefix.length(); i < 15; i++) {
+        for (int i = prefix.length(); i < totalDigits - 1; i++) {
             sb.append(random.nextInt(10));
         }
         // Calculate Luhn check digit
-        String partial = sb.toString();
+        sb.append(calculateLuhnCheckDigit(sb.toString()));
+        return sb.toString();
+    }
+
+    /**
+     * Backward-compatible overload — defaults to VISA.
+     */
+    public static String generateCardNumber() {
+        return generateCardNumber(CardType.VISA);
+    }
+
+    private static int calculateLuhnCheckDigit(String partial) {
         int sum = 0;
         boolean alternate = true;
         for (int i = partial.length() - 1; i >= 0; i--) {
@@ -91,9 +139,7 @@ public class Card {
             sum += n;
             alternate = !alternate;
         }
-        int checkDigit = (10 - (sum % 10)) % 10;
-        sb.append(checkDigit);
-        return sb.toString();
+        return (10 - (sum % 10)) % 10;
     }
 
     public static String generateCvv() {

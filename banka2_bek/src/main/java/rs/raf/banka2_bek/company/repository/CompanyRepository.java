@@ -10,4 +10,5 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
     Optional<Company> findByRegistrationNumber(String registrationNumber);
     boolean existsByTaxNumber(String taxNumber);
     boolean existsByRegistrationNumber(String registrationNumber);
+    Optional<Company> findByIsStateTrue();
 }

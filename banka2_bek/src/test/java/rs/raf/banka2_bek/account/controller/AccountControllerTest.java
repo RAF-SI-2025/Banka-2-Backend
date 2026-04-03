@@ -964,6 +964,159 @@ class AccountControllerTest {
                 .andExpect(status().isForbidden());
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    //  PATCH /accounts/{id}/status
+    // ══════════════════════════════════════════════════════════════════
+
+    @Test
+    @DisplayName("PATCH /accounts/1/status - 200 OK changes to BLOCKED")
+    void changeAccountStatus_returnsOk() throws Exception {
+        AccountResponseDto updated = AccountResponseDto.builder()
+                .id(1L).name("Tekuci racun").accountNumber("222000112345678910")
+                .accountType("CHECKING").status("BLOCKED").build();
+        when(accountService.changeAccountStatus(eq(1L), eq("BLOCKED"))).thenReturn(updated);
+
+        String payload = """
+                {
+                  "status": "BLOCKED"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("BLOCKED"));
+
+        verify(accountService).changeAccountStatus(1L, "BLOCKED");
+    }
+
+    @Test
+    @DisplayName("PATCH /accounts/1/status - 400 when status is null")
+    void changeAccountStatus_nullStatus_returnsBadRequest() throws Exception {
+        String payload = """
+                {
+                  "other": "value"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /accounts/1/status - 400 when service throws for invalid status")
+    void changeAccountStatus_invalidStatus_returnsBadRequest() throws Exception {
+        when(accountService.changeAccountStatus(eq(1L), eq("INVALID")))
+                .thenThrow(new RuntimeException("Nepoznat status: INVALID"));
+
+        String payload = """
+                {
+                  "status": "INVALID"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /accounts/999/status - 400 when account not found")
+    void changeAccountStatus_notFound_returnsBadRequest() throws Exception {
+        when(accountService.changeAccountStatus(eq(999L), eq("BLOCKED")))
+                .thenThrow(new RuntimeException("Racun sa ID 999 nije pronadjen"));
+
+        String payload = """
+                {
+                  "status": "BLOCKED"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/999/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("PATCH /accounts/1/status - 200 OK changes to ACTIVE")
+    void changeAccountStatus_toActive() throws Exception {
+        AccountResponseDto updated = AccountResponseDto.builder()
+                .id(1L).accountNumber("222000112345678910")
+                .accountType("CHECKING").status("ACTIVE").build();
+        when(accountService.changeAccountStatus(eq(1L), eq("ACTIVE"))).thenReturn(updated);
+
+        String payload = """
+                {
+                  "status": "ACTIVE"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    @DisplayName("PATCH /accounts/1/status - 200 OK changes to INACTIVE (deactivation)")
+    void changeAccountStatus_toInactive() throws Exception {
+        AccountResponseDto updated = AccountResponseDto.builder()
+                .id(1L).accountNumber("222000112345678910")
+                .accountType("CHECKING").status("INACTIVE").build();
+        when(accountService.changeAccountStatus(eq(1L), eq("INACTIVE"))).thenReturn(updated);
+
+        String payload = """
+                {
+                  "status": "INACTIVE"
+                }
+                """;
+
+        mockMvc.perform(patch("/accounts/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INACTIVE"));
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  GET /accounts/bank
+    // ══════════════════════════════════════════════════════════════════
+
+    @Test
+    @DisplayName("GET /accounts/bank - 200 OK with bank accounts")
+    void getBankAccounts_returnsList() throws Exception {
+        AccountResponseDto bankAccount = AccountResponseDto.builder()
+                .id(100L).name("Banka RSD").accountNumber("222000119999999901")
+                .accountType("CHECKING").status("ACTIVE")
+                .ownerName("Banka 2")
+                .balance(new BigDecimal("50000000"))
+                .currencyCode("RSD")
+                .build();
+
+        when(accountService.getBankAccounts()).thenReturn(List.of(bankAccount));
+
+        mockMvc.perform(get("/accounts/bank"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].ownerName").value("Banka 2"));
+    }
+
+    @Test
+    @DisplayName("GET /accounts/bank - 200 OK empty list")
+    void getBankAccounts_empty() throws Exception {
+        when(accountService.getBankAccounts()).thenReturn(Collections.emptyList());
+
+        mockMvc.perform(get("/accounts/bank"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
     // ──────────────────────────────────────────────────────────────────
     //  Helper
     // ──────────────────────────────────────────────────────────────────

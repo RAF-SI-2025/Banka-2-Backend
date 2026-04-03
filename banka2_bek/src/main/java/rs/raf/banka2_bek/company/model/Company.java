@@ -48,6 +48,11 @@ public class Company {
     @Builder.Default
     private Boolean active = true;
 
+    // Da li je ovo entitet države (Republika Srbija) — koristi se za poreze
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean isState = false;
+
     @Column(nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();

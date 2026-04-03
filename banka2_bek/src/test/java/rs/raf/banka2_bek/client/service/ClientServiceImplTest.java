@@ -199,4 +199,176 @@ class ClientServiceImplTest {
 
         verify(userRepository).save(argThat(u -> "Stefanovic".equals(u.getLastName())));
     }
+
+    @Test
+    @DisplayName("updateClient - azurira sva polja odjednom")
+    void updateClientAllFields() {
+        Client existing = Client.builder().id(1L).firstName("Stefan").lastName("Jovanovic")
+                .email("stefan@test.com").phone("+381601111111").address("Beograd")
+                .gender("M").dateOfBirth(LocalDate.of(1990, 1, 1)).active(true).build();
+
+        var dto = new UpdateClientRequestDto();
+        dto.setFirstName("Marko");
+        dto.setLastName("Markovic");
+        dto.setGender("M");
+        dto.setPhone("+381609999999");
+        dto.setAddress("Novi Sad");
+        dto.setDateOfBirth(LocalDate.of(1985, 5, 20));
+
+        when(clientRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        User user = new User();
+        user.setEmail("stefan@test.com");
+        when(userRepository.findByEmail("stefan@test.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ClientResponseDto result = clientService.updateClient(1L, dto);
+
+        assertEquals("Marko", result.getFirstName());
+        assertEquals("Markovic", result.getLastName());
+        assertEquals("+381609999999", result.getPhone());
+        assertEquals("Novi Sad", result.getAddress());
+        assertEquals(LocalDate.of(1985, 5, 20), result.getDateOfBirth());
+    }
+
+    @Test
+    @DisplayName("updateClient - user ne postoji u users tabeli, ne sinhrounizuje")
+    void updateClientUserNotInUsersTable() {
+        Client existing = Client.builder().id(1L).firstName("Stefan").lastName("Jovanovic")
+                .email("stefan@test.com").active(true).build();
+
+        var dto = new UpdateClientRequestDto();
+        dto.setPhone("+381609999999");
+
+        when(clientRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userRepository.findByEmail("stefan@test.com")).thenReturn(Optional.empty());
+
+        ClientResponseDto result = clientService.updateClient(1L, dto);
+        assertEquals("+381609999999", result.getPhone());
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("getClients - vraca paginiranu listu bez filtera")
+    void getClientsNoFilters() {
+        Client c1 = Client.builder().id(1L).firstName("Stefan").lastName("Jovanovic")
+                .email("stefan@test.com").active(true).build();
+
+        Page<Client> page = new PageImpl<>(List.of(c1), PageRequest.of(0, 10), 1);
+        when(clientRepository.findByFilters(isNull(), isNull(), isNull(), any(PageRequest.class)))
+                .thenReturn(page);
+
+        Page<ClientResponseDto> result = clientService.getClients(0, 10, null, null, null);
+
+        assertEquals(1, result.getTotalElements());
+    }
+
+    @Test
+    @DisplayName("getClients - vraca praznu stranicu")
+    void getClientsEmpty() {
+        Page<Client> page = new PageImpl<>(List.of(), PageRequest.of(0, 10), 0);
+        when(clientRepository.findByFilters(isNull(), isNull(), isNull(), any(PageRequest.class)))
+                .thenReturn(page);
+
+        Page<ClientResponseDto> result = clientService.getClients(0, 10, null, null, null);
+        assertEquals(0, result.getTotalElements());
+    }
+
+    @Test
+    @DisplayName("getClients - filtrira po prezimenu i emailu")
+    void getClientsFilterByLastNameAndEmail() {
+        Client c1 = Client.builder().id(1L).firstName("Stefan").lastName("Jovanovic")
+                .email("stefan@test.com").active(true).build();
+
+        Page<Client> page = new PageImpl<>(List.of(c1), PageRequest.of(0, 10), 1);
+        when(clientRepository.findByFilters(isNull(), eq("Jovanovic"), eq("stefan@test.com"), any(PageRequest.class)))
+                .thenReturn(page);
+
+        Page<ClientResponseDto> result = clientService.getClients(0, 10, null, "Jovanovic", "stefan@test.com");
+        assertEquals(1, result.getTotalElements());
+    }
+
+    @Test
+    @DisplayName("createClient - kreira User zapis koji vec postoji u users tabeli - ne kreira duplikat")
+    void createClientUserAlreadyExists() {
+        var dto = new CreateClientRequestDto();
+        dto.setFirstName("Ana");
+        dto.setLastName("Anic");
+        dto.setEmail("ana@test.com");
+        dto.setPassword("Test12345");
+
+        when(clientRepository.findByEmail("ana@test.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(any())).thenReturn("encoded");
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> {
+            Client c = inv.getArgument(0);
+            c.setId(3L);
+            return c;
+        });
+        // User already exists
+        when(userRepository.findByEmail("ana@test.com")).thenReturn(Optional.of(new User()));
+
+        ClientResponseDto result = clientService.createClient(dto);
+        assertNotNull(result);
+        // Should not save a new user since one already exists
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    @DisplayName("createClient - setuje sva polja ispravno")
+    void createClientAllFieldsSet() {
+        var dto = new CreateClientRequestDto();
+        dto.setFirstName("Jovan");
+        dto.setLastName("Jovanovic");
+        dto.setEmail("jovan@test.com");
+        dto.setPassword("Pass12345");
+        dto.setPhone("+381601234567");
+        dto.setDateOfBirth(LocalDate.of(1985, 7, 20));
+        dto.setGender("M");
+        dto.setAddress("Nis");
+
+        when(clientRepository.findByEmail("jovan@test.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(any())).thenReturn("encoded");
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> {
+            Client c = inv.getArgument(0);
+            c.setId(5L);
+            return c;
+        });
+        when(userRepository.findByEmail("jovan@test.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ClientResponseDto result = clientService.createClient(dto);
+
+        assertEquals("Jovan", result.getFirstName());
+        assertEquals("Jovanovic", result.getLastName());
+        assertEquals("jovan@test.com", result.getEmail());
+        assertEquals("+381601234567", result.getPhone());
+        assertEquals("Nis", result.getAddress());
+        assertEquals("M", result.getGender());
+        assertEquals(LocalDate.of(1985, 7, 20), result.getDateOfBirth());
+        assertTrue(result.getActive());
+    }
+
+    @Test
+    @DisplayName("updateClient - ne menja polja koja su null u dto")
+    void updateClientNullFieldsIgnored() {
+        Client existing = Client.builder().id(1L).firstName("Stefan").lastName("Jovanovic")
+                .email("stefan@test.com").phone("+381601111111").address("Beograd")
+                .gender("M").dateOfBirth(LocalDate.of(1990, 1, 1)).active(true).build();
+
+        // All fields null - nothing should change
+        var dto = new UpdateClientRequestDto();
+
+        when(clientRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userRepository.findByEmail("stefan@test.com")).thenReturn(Optional.empty());
+
+        ClientResponseDto result = clientService.updateClient(1L, dto);
+
+        assertEquals("Stefan", result.getFirstName());
+        assertEquals("Jovanovic", result.getLastName());
+        assertEquals("+381601111111", result.getPhone());
+        assertEquals("Beograd", result.getAddress());
+    }
 }

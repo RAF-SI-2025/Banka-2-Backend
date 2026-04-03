@@ -7,8 +7,10 @@ import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.berza.dto.ExchangeDto;
 import rs.raf.banka2_bek.berza.service.ExchangeManagementService;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * REST kontroler za upravljanje berzama.
@@ -50,5 +52,54 @@ public class ExchangeManagementController {
         boolean enabled = body.getOrDefault("enabled", false);
         exchangeManagementService.setTestMode(acronym, enabled);
         return ResponseEntity.ok(Map.of("message", "Test mode set to " + enabled + " for " + acronym));
+    }
+
+    /**
+     * GET /exchanges/{acronym}/holidays
+     * Vraca listu praznika za berzu.
+     */
+    @GetMapping("/{acronym}/holidays")
+    public ResponseEntity<Set<LocalDate>> getHolidays(@PathVariable String acronym) {
+        return ResponseEntity.ok(exchangeManagementService.getHolidays(acronym));
+    }
+
+    /**
+     * PUT /exchanges/{acronym}/holidays
+     * Postavlja kompletnu listu praznika za berzu (zamenjuje postojece).
+     */
+    @PutMapping("/{acronym}/holidays")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, String>> setHolidays(
+            @PathVariable String acronym,
+            @RequestBody Set<LocalDate> holidays) {
+        exchangeManagementService.setHolidays(acronym, holidays);
+        return ResponseEntity.ok(Map.of("message", "Set " + holidays.size() + " holidays for " + acronym));
+    }
+
+    /**
+     * POST /exchanges/{acronym}/holidays
+     * Dodaje pojedinacni praznik za berzu.
+     */
+    @PostMapping("/{acronym}/holidays")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, String>> addHoliday(
+            @PathVariable String acronym,
+            @RequestBody Map<String, String> body) {
+        LocalDate date = LocalDate.parse(body.get("date"));
+        exchangeManagementService.addHoliday(acronym, date);
+        return ResponseEntity.ok(Map.of("message", "Added holiday " + date + " for " + acronym));
+    }
+
+    /**
+     * DELETE /exchanges/{acronym}/holidays/{date}
+     * Uklanja praznik za berzu.
+     */
+    @DeleteMapping("/{acronym}/holidays/{date}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, String>> removeHoliday(
+            @PathVariable String acronym,
+            @PathVariable LocalDate date) {
+        exchangeManagementService.removeHoliday(acronym, date);
+        return ResponseEntity.ok(Map.of("message", "Removed holiday " + date + " for " + acronym));
     }
 }

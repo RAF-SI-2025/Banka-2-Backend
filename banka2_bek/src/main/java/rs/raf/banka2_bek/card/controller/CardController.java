@@ -19,6 +19,7 @@ import rs.raf.banka2_bek.card.dto.CardLimitUpdateDto;
 import rs.raf.banka2_bek.card.dto.CardResponseDto;
 import rs.raf.banka2_bek.card.dto.CreateCardRequestDto;
 import rs.raf.banka2_bek.card.model.CardRequest;
+import rs.raf.banka2_bek.card.model.CardType;
 import rs.raf.banka2_bek.card.repository.CardRequestRepository;
 import rs.raf.banka2_bek.card.service.CardService;
 import rs.raf.banka2_bek.client.model.Client;
@@ -102,9 +103,19 @@ public class CardController {
 
         BigDecimal limit = body.get("cardLimit") != null ? new BigDecimal(String.valueOf(body.get("cardLimit"))) : BigDecimal.valueOf(100000);
 
+        CardType requestedCardType = CardType.VISA;
+        if (body.get("cardType") != null) {
+            try {
+                requestedCardType = CardType.valueOf(String.valueOf(body.get("cardType")));
+            } catch (IllegalArgumentException ignored) {
+                // default to VISA if invalid value
+            }
+        }
+
         CardRequest req = CardRequest.builder()
                 .account(account)
                 .cardLimit(limit)
+                .cardType(requestedCardType)
                 .clientEmail(email)
                 .clientName(clientName)
                 .status("PENDING")
@@ -143,7 +154,8 @@ public class CardController {
         Account account = req.getAccount();
         Client owner = account.getClient();
         if (owner == null) throw new IllegalStateException("Racun nema vlasnika");
-        cardService.createCardForAccount(account.getId(), owner.getId(), req.getCardLimit());
+        CardType cardType = req.getCardType() != null ? req.getCardType() : CardType.VISA;
+        cardService.createCardForAccount(account.getId(), owner.getId(), req.getCardLimit(), cardType);
 
         String employeeEmail = SecurityContextHolder.getContext().getAuthentication().getName();
         req.setStatus("APPROVED");
@@ -174,6 +186,7 @@ public class CardController {
         map.put("accountId", req.getAccount().getId());
         map.put("accountNumber", req.getAccount().getAccountNumber());
         map.put("cardLimit", req.getCardLimit());
+        map.put("cardType", req.getCardType() != null ? req.getCardType().name() : null);
         map.put("clientEmail", req.getClientEmail());
         map.put("clientName", req.getClientName());
         map.put("status", req.getStatus());

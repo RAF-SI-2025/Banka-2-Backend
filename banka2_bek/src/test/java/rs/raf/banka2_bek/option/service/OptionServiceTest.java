@@ -7,14 +7,19 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import rs.raf.banka2_bek.account.model.Account;
+import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.actuary.model.ActuaryInfo;
 import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
+import rs.raf.banka2_bek.company.model.Company;
+import rs.raf.banka2_bek.currency.model.Currency;
 import rs.raf.banka2_bek.employee.model.Employee;
 import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.option.model.Option;
 import rs.raf.banka2_bek.option.model.OptionType;
 import rs.raf.banka2_bek.option.repository.OptionRepository;
+import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
@@ -42,6 +47,12 @@ class OptionServiceTest {
 
     @Mock
     private ActuaryInfoRepository actuaryInfoRepository;
+
+    @Mock
+    private AccountRepository accountRepository;
+
+    @Mock
+    private PortfolioRepository portfolioRepository;
 
     @InjectMocks
     private OptionService optionService;
@@ -153,6 +164,19 @@ class OptionServiceTest {
         );
 
         when(optionRepository.findById(1L)).thenReturn(Optional.of(option));
+
+        // Stub bank account (Company ID=3, USD currency) needed by getBankAccount()
+        Company bankCompany = new Company();
+        bankCompany.setId(3L);
+        Currency usd = new Currency();
+        usd.setCode("USD");
+        Account bankAccount = new Account();
+        bankAccount.setCompany(bankCompany);
+        bankAccount.setCurrency(usd);
+        bankAccount.setBalance(new BigDecimal("10000000.00"));
+        bankAccount.setAvailableBalance(new BigDecimal("10000000.00"));
+        when(accountRepository.findAll()).thenReturn(java.util.List.of(bankAccount));
+        when(portfolioRepository.findByUserId(12L)).thenReturn(java.util.Collections.emptyList());
 
         optionService.exerciseOption(1L, "agent@test.com");
 

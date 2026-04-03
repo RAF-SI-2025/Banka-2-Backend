@@ -107,9 +107,14 @@ class PaymentControllerIntegrationTest {
     @MockitoBean
     private ExchangeService exchangeService;
 
+    @MockitoBean
+    private rs.raf.banka2_bek.otp.service.OtpService otpService;
+
     @BeforeEach
     void cleanDatabase() {
         when(exchangeService.getAllRates()).thenReturn(fixedRates());
+        when(otpService.verify(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(Map.of("verified", true));
 
         restTemplate.setErrorHandler(new DefaultResponseErrorHandler() {
             @Override
@@ -150,7 +155,8 @@ class PaymentControllerIntegrationTest {
                   "amount": 100.00,
                   "paymentCode": "289",
                   "referenceNumber": "REF-1",
-                  "description": "Test same-currency payment"
+                  "description": "Test same-currency payment",
+                  "otpCode": "123456"
                 }
                 """.formatted(fromNumber, toNumber);
 
@@ -218,7 +224,8 @@ class PaymentControllerIntegrationTest {
                   "amount": 100.00,
                   "paymentCode": "289",
                   "referenceNumber": "REF-FX",
-                  "description": "Test cross-currency payment"
+                  "description": "Test cross-currency payment",
+                  "otpCode": "123456"
                 }
                 """.formatted(fromNumber, toNumber);
 
@@ -586,7 +593,8 @@ class PaymentControllerIntegrationTest {
                   "amount": %s,
                   "paymentCode": "289",
                   "referenceNumber": "%s",
-                  "description": "Generated payment"
+                  "description": "Generated payment",
+                  "otpCode": "123456"
                 }
                 """.formatted(fromAccount, toAccount, amount.toPlainString(), referenceNumber);
 

@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import rs.raf.banka2_bek.account.model.Account;
@@ -20,6 +21,7 @@ import rs.raf.banka2_bek.auth.config.GlobalExceptionHandler;
 import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.currency.model.Currency;
+import rs.raf.banka2_bek.otp.service.OtpService;
 import rs.raf.banka2_bek.payment.model.PaymentStatus;
 import rs.raf.banka2_bek.transfers.dto.TransferResponseDto;
 import rs.raf.banka2_bek.transfers.service.TransferService;
@@ -27,6 +29,7 @@ import rs.raf.banka2_bek.transfers.service.TransferService;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
@@ -51,6 +54,9 @@ class TransferControllerTest {
     @Mock
     private AccountRepository accountRepository;
 
+    @Mock
+    private OtpService otpService;
+
     @InjectMocks
     private TransferController transferController;
 
@@ -72,6 +78,12 @@ class TransferControllerTest {
         testTransfer.setClientFirstName("Marko");
         testTransfer.setClientLastName("Markovic");
         testTransfer.setStatus(PaymentStatus.COMPLETED);
+
+        // OTP verification always succeeds in controller tests
+        when(otpService.verify(anyString(), anyString())).thenReturn(Map.of("verified", true));
+
+        // Set up authentication so controller can extract email
+        setupSecurityContext("marko@banka.rs");
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -93,13 +105,15 @@ class TransferControllerTest {
                 {
                   "fromAccountNumber": "111111111111111111",
                   "toAccountNumber": "222222222222222222",
-                  "amount": 500.00
+                  "amount": 500.00,
+                  "otpCode": "123456"
                 }
                 """;
 
         mockMvc.perform(post("/transfers/internal")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(payload)
+                        .principal(SecurityContextHolder.getContext().getAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fromAccountNumber").value("111111111111111111"))
                 .andExpect(jsonPath("$.toAccountNumber").value("222222222222222222"))
@@ -107,7 +121,6 @@ class TransferControllerTest {
                 .andExpect(jsonPath("$.status").value("COMPLETED"));
 
         verify(transferService).internalTransfer(any());
-        verify(transferService, never()).fxTransfer(any());
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -115,16 +128,9 @@ class TransferControllerTest {
     // ══════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("POST /transfers/internal - 200 OK cross currency routes to FX")
+    @DisplayName("POST /transfers/internal - 200 OK cross currency routes to FX via service")
     void internalTransfer_crossCurrency_routesToFx() throws Exception {
-        Currency eur = Currency.builder().id(1L).code("EUR").build();
-        Currency usd = Currency.builder().id(2L).code("USD").build();
-        Account from = Account.builder().accountNumber("111111111111111111").currency(eur).build();
-        Account to = Account.builder().accountNumber("222222222222222222").currency(usd).build();
-
-        when(accountRepository.findByAccountNumber("111111111111111111")).thenReturn(Optional.of(from));
-        when(accountRepository.findByAccountNumber("222222222222222222")).thenReturn(Optional.of(to));
-
+        // The controller now always calls internalTransfer; FX routing happens inside the service
         TransferResponseDto fxResponse = new TransferResponseDto();
         fxResponse.setFromAccountNumber("111111111111111111");
         fxResponse.setToAccountNumber("222222222222222222");
@@ -133,25 +139,26 @@ class TransferControllerTest {
         fxResponse.setCommission(new BigDecimal("2.50"));
         fxResponse.setStatus(PaymentStatus.COMPLETED);
 
-        when(transferService.fxTransfer(any())).thenReturn(fxResponse);
+        when(transferService.internalTransfer(any())).thenReturn(fxResponse);
 
         String payload = """
                 {
                   "fromAccountNumber": "111111111111111111",
                   "toAccountNumber": "222222222222222222",
-                  "amount": 500.00
+                  "amount": 500.00,
+                  "otpCode": "123456"
                 }
                 """;
 
         mockMvc.perform(post("/transfers/internal")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(payload)
+                        .principal(SecurityContextHolder.getContext().getAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.exchangeRate").value(1.08))
                 .andExpect(jsonPath("$.commission").value(2.50));
 
-        verify(transferService).fxTransfer(any());
-        verify(transferService, never()).internalTransfer(any());
+        verify(transferService).internalTransfer(any());
     }
 
     @Test
@@ -165,13 +172,15 @@ class TransferControllerTest {
                 {
                   "fromAccountNumber": "111111111111111111",
                   "toAccountNumber": "222222222222222222",
-                  "amount": 500.00
+                  "amount": 500.00,
+                  "otpCode": "123456"
                 }
                 """;
 
         mockMvc.perform(post("/transfers/internal")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(payload)
+                        .principal(SecurityContextHolder.getContext().getAuthentication()))
                 .andExpect(status().isOk());
 
         verify(transferService).internalTransfer(any());
@@ -188,13 +197,15 @@ class TransferControllerTest {
                 {
                   "fromAccountNumber": "111111111111111111",
                   "toAccountNumber": "222222222222222222",
-                  "amount": 500.00
+                  "amount": 500.00,
+                  "otpCode": "123456"
                 }
                 """;
 
         mockMvc.perform(post("/transfers/internal")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(payload)
+                        .principal(SecurityContextHolder.getContext().getAuthentication()))
                 .andExpect(status().isBadRequest());
     }
 
@@ -218,13 +229,15 @@ class TransferControllerTest {
                 {
                   "fromAccountNumber": "111111111111111111",
                   "toAccountNumber": "222222222222222222",
-                  "amount": 500.00
+                  "amount": 500.00,
+                  "otpCode": "123456"
                 }
                 """;
 
         mockMvc.perform(post("/transfers/fx")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(payload)
+                        .principal(SecurityContextHolder.getContext().getAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.exchangeRate").value(1.08));
 
@@ -314,6 +327,7 @@ class TransferControllerTest {
         Authentication auth = mock(Authentication.class);
         when(auth.getName()).thenReturn(email);
         when(auth.getPrincipal()).thenReturn(email);
+        when(auth.isAuthenticated()).thenReturn(true);
         SecurityContext secCtx = mock(SecurityContext.class);
         when(secCtx.getAuthentication()).thenReturn(auth);
         SecurityContextHolder.setContext(secCtx);

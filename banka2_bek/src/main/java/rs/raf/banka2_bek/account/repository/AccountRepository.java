@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import rs.raf.banka2_bek.account.model.Account;
@@ -57,4 +58,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber")
     List<Account> findBankAccounts(@Param("regNumber") String regNumber);
+
+    @Modifying
+    @Query("UPDATE Account a SET a.dailySpending = 0")
+    int resetDailySpending();
+
+    @Modifying
+    @Query("UPDATE Account a SET a.monthlySpending = 0")
+    int resetMonthlySpending();
 }

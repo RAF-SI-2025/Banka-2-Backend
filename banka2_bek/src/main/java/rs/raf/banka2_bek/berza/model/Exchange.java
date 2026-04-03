@@ -3,15 +3,15 @@ package rs.raf.banka2_bek.berza.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * JPA entitet koji predstavlja berzu (stock exchange).
  *
  * Specifikacija: Celina 3 - Berza
- *
- * TODO: Razmotriti dodavanje holiday calendar-a (zasebna tabela ili JSON polje)
- *       za praznike kada je berza zatvorena iako nije vikend.
  */
 @Entity
 @Table(name = "exchanges")
@@ -78,4 +78,14 @@ public class Exchange {
     @Column(nullable = false)
     @Builder.Default
     private boolean active = true;
+
+    /**
+     * Datumi praznika kada je berza zatvorena iako nije vikend.
+     * Cuva se u zasebnoj tabeli exchange_holidays putem @ElementCollection.
+     */
+    @ElementCollection
+    @CollectionTable(name = "exchange_holidays", joinColumns = @JoinColumn(name = "exchange_id"))
+    @Column(name = "holiday_date")
+    @Builder.Default
+    private Set<LocalDate> holidays = new HashSet<>();
 }

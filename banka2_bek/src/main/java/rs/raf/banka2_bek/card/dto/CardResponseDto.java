@@ -3,6 +3,7 @@ package rs.raf.banka2_bek.card.dto;
 import lombok.Builder;
 import lombok.Data;
 import rs.raf.banka2_bek.card.model.CardStatus;
+import rs.raf.banka2_bek.card.model.CardType;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -14,6 +15,7 @@ public class CardResponseDto {
     private String cardNumber;
     private String cardName;
     private String cvv;
+    private CardType cardType;
     private Long accountId;
     private String accountNumber;
     private String ownerName;

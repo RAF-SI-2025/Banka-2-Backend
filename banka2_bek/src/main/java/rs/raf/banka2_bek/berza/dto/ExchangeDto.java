@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
+import java.util.Set;
+
 /**
  * DTO za prikaz berze klijentu.
  *
@@ -43,4 +46,7 @@ public class ExchangeDto {
 
     /** Kada se berza sledeci put otvara (ISO 8601), null ako je trenutno otvorena */
     private String nextOpenTime;
+
+    /** Datumi praznika kada je berza zatvorena */
+    private Set<LocalDate> holidays;
 }

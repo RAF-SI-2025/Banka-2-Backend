@@ -15,15 +15,24 @@ import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.DefaultResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
+import rs.raf.banka2_bek.account.model.Account;
+import rs.raf.banka2_bek.account.model.AccountStatus;
+import rs.raf.banka2_bek.account.model.AccountType;
+import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.actuary.model.ActuaryInfo;
 import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
 import rs.raf.banka2_bek.auth.service.JwtService;
+import rs.raf.banka2_bek.company.model.Company;
+import rs.raf.banka2_bek.company.repository.CompanyRepository;
+import rs.raf.banka2_bek.currency.model.Currency;
+import rs.raf.banka2_bek.currency.repository.CurrencyRepository;
 import rs.raf.banka2_bek.employee.model.Employee;
 import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.option.model.Option;
 import rs.raf.banka2_bek.option.model.OptionType;
 import rs.raf.banka2_bek.option.repository.OptionRepository;
+import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
@@ -33,6 +42,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
+
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -60,6 +71,21 @@ class OptionControllerIntegrationTest {
     @Autowired
     private ActuaryInfoRepository actuaryInfoRepository;
 
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
+    private CompanyRepository companyRepository;
+
+    @Autowired
+    private CurrencyRepository currencyRepository;
+
+    @Autowired
+    private PortfolioRepository portfolioRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void setUp() {
         restTemplate.setErrorHandler(new DefaultResponseErrorHandler() {
@@ -69,10 +95,50 @@ class OptionControllerIntegrationTest {
             }
         });
 
+        portfolioRepository.deleteAll();
         optionRepository.deleteAll();
         actuaryInfoRepository.deleteAll();
+        accountRepository.deleteAll();
         employeeRepository.deleteAll();
         listingRepository.deleteAll();
+        companyRepository.deleteAll();
+
+        // Create bank USD account (Company ID=3) required by OptionService.getBankAccount()
+        ensureBankUsdAccount();
+    }
+
+    private void ensureBankUsdAccount() {
+        Currency usd = currencyRepository.findByCode("USD").orElseGet(() -> {
+            Currency c = new Currency();
+            c.setCode("USD");
+            c.setName("US Dollar");
+            c.setSymbol("$");
+            c.setCountry("US");
+            return currencyRepository.save(c);
+        });
+
+        // Insert company with explicit ID=3 via JDBC (JPA @GeneratedValue won't let us set ID)
+        if (companyRepository.findById(3L).isEmpty()) {
+            jdbcTemplate.update(
+                    "INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address, active, is_state, created_at) " +
+                    "VALUES (3, 'Banka 2025', '99999999', '999999999', '64.19', 'Beograd', true, false, NOW())");
+        }
+        Company bankCompany = companyRepository.findById(3L).orElseThrow();
+
+        // Need an employee for the account (required FK)
+        Employee bankEmployee = createEmployee("bank.system@banka.rs", true, Set.of("ADMIN"));
+
+        Account bankAccount = Account.builder()
+                .accountNumber("333000000000000001")
+                .accountType(AccountType.BUSINESS)
+                .currency(usd)
+                .company(bankCompany)
+                .employee(bankEmployee)
+                .balance(new BigDecimal("100000000.0000"))
+                .availableBalance(new BigDecimal("100000000.0000"))
+                .status(AccountStatus.ACTIVE)
+                .build();
+        accountRepository.save(bankAccount);
     }
 
     @Test
@@ -101,8 +167,8 @@ class OptionControllerIntegrationTest {
     void exerciseOption_returnsOk_forAdminEmployeeWithoutActuaryInfo() {
         Employee admin = createEmployee("admin@test.com", true, Set.of("ADMIN"));
 
-        Listing listing = createListing("MSFT", new BigDecimal("150.00"));
-        Option option = createOption(listing, OptionType.PUT, new BigDecimal("180.00"), LocalDate.now().plusDays(5), 2);
+        Listing listing = createListing("MSFT", new BigDecimal("200.00"));
+        Option option = createOption(listing, OptionType.CALL, new BigDecimal("180.00"), LocalDate.now().plusDays(5), 2);
 
         ResponseEntity<String> response = restTemplate.exchange(
                 url("/options/" + option.getId() + "/exercise"),

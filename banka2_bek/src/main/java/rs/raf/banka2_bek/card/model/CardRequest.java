@@ -7,6 +7,7 @@ import rs.raf.banka2_bek.account.model.Account;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+
 @Entity
 @Table(name = "card_requests")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -21,6 +22,10 @@ public class CardRequest {
     private Account account;
 
     private BigDecimal cardLimit;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private CardType cardType;
 
     @Column(nullable = false)
     private String clientEmail;
