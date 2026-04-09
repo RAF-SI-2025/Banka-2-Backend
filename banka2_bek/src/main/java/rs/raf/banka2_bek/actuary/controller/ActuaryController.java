@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.actuary.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -50,7 +51,7 @@ public class ActuaryController {
     @PatchMapping("/{employeeId}/limit")
     public ResponseEntity<ActuaryInfoDto> updateAgentLimit(
             @PathVariable Long employeeId,
-            @RequestBody UpdateActuaryLimitDto dto) {
+            @Valid @RequestBody UpdateActuaryLimitDto dto) {
         return ResponseEntity.ok(actuaryService.updateAgentLimit(employeeId, dto));
     }
 

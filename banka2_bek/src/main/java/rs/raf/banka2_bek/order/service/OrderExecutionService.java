@@ -55,13 +55,13 @@ public class OrderExecutionService {
     private final TransactionRepository transactionRepository;
     private final AonValidationService aonValidationService;
 
-    /** Provizija za MARKET naloge: max(14% * price, $7) */
+    /** Provizija za MARKET naloge: min(14% * price, $7) — spec: "koji iznos je manji" */
     private static final BigDecimal MARKET_COMMISSION_RATE = new BigDecimal("0.14");
-    private static final BigDecimal MARKET_COMMISSION_MIN = new BigDecimal("7");
+    private static final BigDecimal MARKET_COMMISSION_MAX = new BigDecimal("7");
 
-    /** Provizija za LIMIT naloge: max(24% * price, $12) */
+    /** Provizija za LIMIT naloge: min(24% * price, $12) — spec: "koji iznos je manji" */
     private static final BigDecimal LIMIT_COMMISSION_RATE = new BigDecimal("0.24");
-    private static final BigDecimal LIMIT_COMMISSION_MIN = new BigDecimal("12");
+    private static final BigDecimal LIMIT_COMMISSION_MAX = new BigDecimal("12");
 
     /** Dodatan delay po fill-u za after-hours naloge (u minutima) */
     private static final int AFTER_HOURS_DELAY_MINUTES = 30;
@@ -291,13 +291,14 @@ public class OrderExecutionService {
     }
 
     /**
-     * Racuna proviziju: MARKET (max(0.14% * price, $7)), LIMIT (max(0.24% * price, $12))
+     * Racuna proviziju: MARKET min(14% * price, $7), LIMIT min(24% * price, $12)
+     * Spec: "u zavisnosti od toga koji iznos je manji"
      */
     private BigDecimal calculateCommission(BigDecimal totalPrice, OrderType orderType) {
         if (orderType == OrderType.MARKET) {
-            return totalPrice.multiply(MARKET_COMMISSION_RATE).max(MARKET_COMMISSION_MIN);
+            return totalPrice.multiply(MARKET_COMMISSION_RATE).min(MARKET_COMMISSION_MAX);
         } else {
-            return totalPrice.multiply(LIMIT_COMMISSION_RATE).max(LIMIT_COMMISSION_MIN);
+            return totalPrice.multiply(LIMIT_COMMISSION_RATE).min(LIMIT_COMMISSION_MAX);
         }
     }
 

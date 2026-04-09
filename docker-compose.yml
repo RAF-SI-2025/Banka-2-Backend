@@ -31,7 +31,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/banka2?useUnicode=true&characterEncoding=UTF-8
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/banka2?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci
       SPRING_DATASOURCE_USERNAME: banka2user
       SPRING_DATASOURCE_PASSWORD: banka2pass
       SPRING_JPA_HIBERNATE_DDL_AUTO: update

@@ -11,6 +11,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import rs.raf.banka2_bek.exchange.ExchangeService;
 import rs.raf.banka2_bek.exchange.dto.ExchangeRateDto;
 import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
@@ -69,6 +72,15 @@ public class ListingServiceImpl implements ListingService {
 
     @Override
     public Page<ListingDto> getListings(String type, String search, int page, int size) {
+        return getListings(type, search, null, null, null, null, null, page, size);
+    }
+
+    @Override
+    public Page<ListingDto> getListings(String type, String search,
+                                        String exchangePrefix,
+                                        BigDecimal priceMin, BigDecimal priceMax,
+                                        LocalDate settlementDateFrom, LocalDate settlementDateTo,
+                                        int page, int size) {
         ListingType listingType;
         try {
             listingType = ListingType.valueOf(type.toUpperCase());
@@ -80,9 +92,15 @@ public class ListingServiceImpl implements ListingService {
             throw new IllegalStateException("Klijenti nemaju pristup FOREX hartijama.");
         }
 
+        // Validate price range
+        if (priceMin != null && priceMax != null && priceMin.compareTo(priceMax) > 0) {
+            throw new IllegalArgumentException("Minimalna cena ne moze biti veca od maksimalne.");
+        }
+
         var pageable = PageRequest.of(page, size, Sort.by("ticker").ascending());
         return listingRepository
-                .findAll(ListingSpec.byTypeAndSearch(listingType, search), pageable)
+                .findAll(ListingSpec.withFilters(listingType, search, exchangePrefix,
+                        priceMin, priceMax, settlementDateFrom, settlementDateTo), pageable)
                 .map(ListingMapper::toDto);
     }
 

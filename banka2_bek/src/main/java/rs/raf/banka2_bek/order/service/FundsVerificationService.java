@@ -71,11 +71,11 @@ public class FundsVerificationService {
     }
 
     private BigDecimal computeCommission(BigDecimal approximatePrice, OrderType orderType) {
-        // Spec: Market → max(14% * price, $7), Limit → max(24% * price, $12)
-        // STOP uses market pricing, STOP_LIMIT uses limit pricing
+        // Spec: Market → min(14% * price, $7), Limit → min(24% * price, $12)
+        // "u zavisnosti od toga koji iznos je manji"
         return switch (orderType) {
-            case MARKET, STOP -> approximatePrice.multiply(new BigDecimal("0.14")).max(new BigDecimal("7"));
-            case LIMIT, STOP_LIMIT -> approximatePrice.multiply(new BigDecimal("0.24")).max(new BigDecimal("12"));
+            case MARKET, STOP -> approximatePrice.multiply(new BigDecimal("0.14")).min(new BigDecimal("7"));
+            case LIMIT, STOP_LIMIT -> approximatePrice.multiply(new BigDecimal("0.24")).min(new BigDecimal("12"));
         };
     }
 

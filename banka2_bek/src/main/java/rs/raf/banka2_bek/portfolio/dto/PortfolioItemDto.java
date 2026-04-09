@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class PortfolioItemDto {
     private Long id;
+    private Long listingId;
     private String listingTicker;
     private String listingName;
     private String listingType;

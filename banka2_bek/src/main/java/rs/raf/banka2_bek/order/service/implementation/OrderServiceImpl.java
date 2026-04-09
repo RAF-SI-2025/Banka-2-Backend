@@ -169,8 +169,8 @@ public class OrderServiceImpl implements OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new EntityNotFoundException("Order not found " + orderId));
 
-        if (order.getStatus() != OrderStatus.PENDING) {
-            throw new IllegalStateException("Only PENDING orders can be declined");
+        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.APPROVED) {
+            throw new IllegalStateException("Only PENDING or APPROVED orders can be declined/cancelled");
         }
 
         String supervisorName = getSupervisorName();

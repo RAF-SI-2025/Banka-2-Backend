@@ -4,6 +4,8 @@ import org.springframework.data.domain.Page;
 import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
 import rs.raf.banka2_bek.stock.dto.ListingDto;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 public interface ListingService {
@@ -15,6 +17,15 @@ public interface ListingService {
      * Aktuari vide sve.
      */
     Page<ListingDto> getListings(String type, String search, int page, int size);
+
+    /**
+     * Vraca stranicu hartija sa naprednim filterima.
+     */
+    Page<ListingDto> getListings(String type, String search,
+                                 String exchangePrefix,
+                                 BigDecimal priceMin, BigDecimal priceMax,
+                                 LocalDate settlementDateFrom, LocalDate settlementDateTo,
+                                 int page, int size);
 
     /**
      * Vraca detalje za jednu hartiju po ID-ju.

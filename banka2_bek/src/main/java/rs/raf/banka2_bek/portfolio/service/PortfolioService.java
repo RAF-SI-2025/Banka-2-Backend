@@ -64,6 +64,7 @@ public class PortfolioService {
 
             PortfolioItemDto dto = new PortfolioItemDto();
             dto.setId(p.getId());
+            dto.setListingId(p.getListingId());
             dto.setListingTicker(p.getListingTicker());
             dto.setListingName(p.getListingName());
             dto.setListingType(p.getListingType());
@@ -148,6 +149,7 @@ public class PortfolioService {
 
         PortfolioItemDto dto = new PortfolioItemDto();
         dto.setId(portfolio.getId());
+        dto.setListingId(portfolio.getListingId());
         dto.setListingTicker(portfolio.getListingTicker());
         dto.setListingName(portfolio.getListingName());
         dto.setListingType(portfolio.getListingType());

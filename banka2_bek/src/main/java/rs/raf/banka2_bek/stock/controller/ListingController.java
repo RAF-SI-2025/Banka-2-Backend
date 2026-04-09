@@ -10,11 +10,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.format.annotation.DateTimeFormat;
 import rs.raf.banka2_bek.auth.dto.MessageResponseDto;
 import rs.raf.banka2_bek.stock.dto.ListingDailyPriceDto;
 import rs.raf.banka2_bek.stock.dto.ListingDto;
 import rs.raf.banka2_bek.stock.service.ListingService;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @Tag(name = "Listings", description = "Hartije od vrednosti — pretraga, detalji i osvezavanje cena")
@@ -38,9 +41,16 @@ public class ListingController {
     public ResponseEntity<Page<ListingDto>> getListings(
             @RequestParam(defaultValue = "STOCK") String type,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String exchangePrefix,
+            @RequestParam(required = false) BigDecimal priceMin,
+            @RequestParam(required = false) BigDecimal priceMax,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate settlementDateFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate settlementDateTo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(listingService.getListings(type, search, page, size));
+        return ResponseEntity.ok(listingService.getListings(type, search,
+                exchangePrefix, priceMin, priceMax, settlementDateFrom, settlementDateTo,
+                page, size));
     }
 
 
