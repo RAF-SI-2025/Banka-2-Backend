@@ -2039,31 +2039,320 @@ VALUES
 -- ============================================================
 -- MARGIN ACCOUNTS
 -- ============================================================
--- user_id 3 = Stefan, account_id 1 = his RSD checking
+-- client_id: 1=Stefan, 2=Milica, 3=Lazar, 4=Ana
+-- account_id: 1=Stefan RSD, 4=Milica RSD, 7=Lazar RSD, 10=Ana Youth RSD
 
 INSERT IGNORE INTO margin_accounts (bank_participation, created_at, initial_margin, loan_value,
                                     maintenance_margin, status, user_id, account_id)
 VALUES
-    (0.4000, NOW(), 50000.0000, 80000.0000, 30000.0000, 'ACTIVE', 3, 1),
-    (0.5000, NOW(), 25000.0000, 40000.0000, 15000.0000, 'BLOCKED', 4, 4);
+    -- Stefan (client_id=1): aktivan margin racun, linked to his RSD checking (account_id=1)
+    (0.4000, NOW(), 50000.0000, 20000.0000, 25000.0000, 'ACTIVE', 1, 1),
+    -- Milica (client_id=2): blokiran margin racun, linked to her RSD checking (account_id=4)
+    (0.5000, NOW(), 25000.0000, 12500.0000, 12500.0000, 'BLOCKED', 2, 4),
+    -- Lazar (client_id=3): aktivan margin racun, linked to his RSD checking (account_id=7)
+    (0.3000, NOW(), 40000.0000, 12000.0000, 20000.0000, 'ACTIVE', 3, 7),
+    -- Ana (client_id=4): aktivan margin racun, linked to her Youth RSD (account_id=10)
+    (0.4500, NOW(), 30000.0000, 13500.0000, 15000.0000, 'ACTIVE', 4, 10);
 
 -- Margin transactions for Stefan's margin account
 INSERT IGNORE INTO margin_transactions (amount, created_at, description, type, margin_account_id)
 SELECT 50000.00, DATE_SUB(NOW(), INTERVAL 3 DAY), 'Inicijalna uplata', 'DEPOSIT', id
-FROM margin_accounts WHERE user_id = 3 LIMIT 1;
+FROM margin_accounts WHERE user_id = 1 LIMIT 1;
 
 INSERT IGNORE INTO margin_transactions (amount, created_at, description, type, margin_account_id)
 SELECT 20000.00, DATE_SUB(NOW(), INTERVAL 1 DAY), 'Isplata', 'WITHDRAWAL', id
+FROM margin_accounts WHERE user_id = 1 LIMIT 1;
+
+-- Margin transactions for Lazar's margin account
+INSERT IGNORE INTO margin_transactions (amount, created_at, description, type, margin_account_id)
+SELECT 40000.00, DATE_SUB(NOW(), INTERVAL 5 DAY), 'Inicijalna uplata', 'DEPOSIT', id
 FROM margin_accounts WHERE user_id = 3 LIMIT 1;
+
+INSERT IGNORE INTO margin_transactions (amount, created_at, description, type, margin_account_id)
+SELECT 10000.00, DATE_SUB(NOW(), INTERVAL 2 DAY), 'Delimicna isplata', 'WITHDRAWAL', id
+FROM margin_accounts WHERE user_id = 3 LIMIT 1;
+
+-- Margin transactions for Ana's margin account
+INSERT IGNORE INTO margin_transactions (amount, created_at, description, type, margin_account_id)
+SELECT 30000.00, DATE_SUB(NOW(), INTERVAL 4 DAY), 'Inicijalna uplata', 'DEPOSIT', id
+FROM margin_accounts WHERE user_id = 4 LIMIT 1;
 
 -- ============================================================
 -- TAX RECORDS
 -- ============================================================
 
+-- Obrisi stare tax zapise pre ponovnog ubacivanja (sprecava duplikate pri re-seed)
+DELETE FROM tax_records;
+
+-- client_id: 1=Stefan, 2=Milica, 3=Lazar, 4=Ana
+-- employee_id: 1=Marko, 2=Jelena, 3=Nikola, 4=Tamara, 5=Djordje, 6=Maja
 INSERT IGNORE INTO tax_records (calculated_at, currency, tax_owed, tax_paid, total_profit,
                                 user_id, user_name, user_type)
 VALUES
-    (NOW(), 'RSD', 1500.0000, 750.0000, 10000.0000, 3, 'Stefan Jovanovic', 'CLIENT'),
-    (NOW(), 'RSD', 2250.0000, 2250.0000, 15000.0000, 4, 'Milica Nikolic', 'CLIENT'),
-    (NOW(), 'RSD', 450.0000, 0.0000, 3000.0000, 2, 'Tamara Pavlovic', 'EMPLOYEE'),
-    (NOW(), 'RSD', 1050.0000, 1050.0000, 7000.0000, 3, 'Djordje Jankovic', 'EMPLOYEE');
+    (NOW(), 'RSD', 1500.0000, 750.0000, 10000.0000, 1, 'Stefan Jovanovic', 'CLIENT'),
+    (NOW(), 'RSD', 2250.0000, 2250.0000, 15000.0000, 2, 'Milica Nikolic', 'CLIENT'),
+    (NOW(), 'RSD', 450.0000, 0.0000, 3000.0000, 4, 'Tamara Pavlovic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 1050.0000, 1050.0000, 7000.0000, 5, 'Djordje Jankovic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 800.0000, 0.0000, 5300.0000, 6, 'Maja Ristic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 300.0000, 300.0000, 2000.0000, 3, 'Nikola Milenkovic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 600.0000, 600.0000, 4000.0000, 1, 'Marko Petrovic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 375.0000, 0.0000, 2500.0000, 2, 'Jelena Djordjevic', 'EMPLOYEE'),
+    (NOW(), 'RSD', 900.0000, 450.0000, 6000.0000, 3, 'Lazar Ilic', 'CLIENT'),
+    (NOW(), 'RSD', 150.0000, 0.0000, 1000.0000, 4, 'Ana Stojanovic', 'CLIENT');
+
+-- ============================================================
+-- PORTFOLIOS ZA ZAPOSLENE (aktuare) — za E2E scenario testiranje
+-- ============================================================
+-- Nikola Milenkovic (supervisor, employee_id=3) poseduje AAPL, GOOG, EUR/USD forex
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 3, l.id, l.ticker, l.name, 'STOCK', 25, 178.5000, 0, NOW()
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 3 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 3, l.id, l.ticker, l.name, 'STOCK', 40, 162.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'GOOG'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 3 AND p.listing_id = l.id);
+
+-- Tamara Pavlovic (agent, employee_id=4) poseduje MSFT, TSLA
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 4, l.id, l.ticker, l.name, 'STOCK', 15, 395.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'MSFT'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 4 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 4, l.id, l.ticker, l.name, 'STOCK', 10, 248.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'TSLA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 4 AND p.listing_id = l.id);
+
+-- Djordje Jankovic (agent, employee_id=5) poseduje CLM26 futures, AMZN
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 5, l.id, l.ticker, l.name, 'FUTURES', 5, 65.2000, 0, NOW()
+FROM listings l WHERE l.ticker = 'CLM26'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 5 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 5, l.id, l.ticker, l.name, 'STOCK', 20, 178.5000, 0, NOW()
+FROM listings l WHERE l.ticker = 'AMZN'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 5 AND p.listing_id = l.id);
+
+-- Maja Ristic (agent, employee_id=6) poseduje AAPL, MSFT, NVDA
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 6, l.id, l.ticker, l.name, 'STOCK', 20, 180.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 6 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 6, l.id, l.ticker, l.name, 'STOCK', 10, 390.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'MSFT'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 6 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 6, l.id, l.ticker, l.name, 'STOCK', 8, 820.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'NVDA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 6 AND p.listing_id = l.id);
+
+-- Lazar Ilic (klijent, user_id=3) poseduje TSLA, GOOG
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT u.id, l.id, l.ticker, l.name, 'STOCK', 15, 255.0000, 0, NOW()
+FROM users u, listings l
+WHERE u.email = 'lazar.ilic@yahoo.com' AND l.ticker = 'TSLA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = u.id AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT u.id, l.id, l.ticker, l.name, 'STOCK', 30, 160.0000, 0, NOW()
+FROM users u, listings l
+WHERE u.email = 'lazar.ilic@yahoo.com' AND l.ticker = 'GOOG'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = u.id AND p.listing_id = l.id);
+
+-- Ana Stojanovic (klijent) poseduje NVDA, AAPL
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT u.id, l.id, l.ticker, l.name, 'STOCK', 5, 810.0000, 0, NOW()
+FROM users u, listings l
+WHERE u.email = 'ana.stojanovic@hotmail.com' AND l.ticker = 'NVDA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = u.id AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT u.id, l.id, l.ticker, l.name, 'STOCK', 10, 175.0000, 0, NOW()
+FROM users u, listings l
+WHERE u.email = 'ana.stojanovic@hotmail.com' AND l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = u.id AND p.listing_id = l.id);
+
+-- Marko Petrovic (admin/supervizor, employee_id=1) poseduje AAPL, MSFT, AMZN
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 1, l.id, l.ticker, l.name, 'STOCK', 30, 176.0000, 5, NOW()
+FROM listings l WHERE l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 1 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 1, l.id, l.ticker, l.name, 'STOCK', 20, 385.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'MSFT'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 1 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 1, l.id, l.ticker, l.name, 'STOCK', 12, 175.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'AMZN'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 1 AND p.listing_id = l.id);
+
+-- Jelena Djordjevic (admin/supervizor, employee_id=2) poseduje GOOG, NVDA
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 2, l.id, l.ticker, l.name, 'STOCK', 35, 158.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'GOOG'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 2 AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT 2, l.id, l.ticker, l.name, 'STOCK', 6, 800.0000, 0, NOW()
+FROM listings l WHERE l.ticker = 'NVDA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = 2 AND p.listing_id = l.id);
+
+-- ============================================================
+-- ORDERS ZA ZAPOSLENE (aktuare) — razliciti statusi za testiranje
+-- ============================================================
+
+-- Nikola (supervisor, emp_id=3) — BUY AAPL DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'No need for approval', 4462.5000, 1, DATE_SUB(NOW(), INTERVAL 10 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 10 DAY), NULL, 0, 'MARKET', 178.5000,
+     25, 0, 'DONE', NULL, 3, 'EMPLOYEE', 1);
+
+-- Nikola — BUY GOOG DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'No need for approval', 6480.0000, 1, DATE_SUB(NOW(), INTERVAL 8 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 8 DAY), NULL, 0, 'MARKET', 162.0000,
+     40, 0, 'DONE', NULL, 3, 'EMPLOYEE', 3);
+
+-- Maja (agent, emp_id=6) — BUY AAPL DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 3600.0000, 1, DATE_SUB(NOW(), INTERVAL 6 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 6 DAY), NULL, 0, 'MARKET', 180.0000,
+     20, 0, 'DONE', NULL, 6, 'EMPLOYEE', 1);
+
+-- Maja — BUY MSFT DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 3900.0000, 1, DATE_SUB(NOW(), INTERVAL 5 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 5 DAY), NULL, 0, 'MARKET', 390.0000,
+     10, 0, 'DONE', NULL, 6, 'EMPLOYEE', 2);
+
+-- Maja — BUY NVDA DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 6560.0000, 1, DATE_SUB(NOW(), INTERVAL 4 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 4 DAY), NULL, 0, 'MARKET', 820.0000,
+     8, 0, 'DONE', NULL, 6, 'EMPLOYEE', 5);
+
+-- Maja — LIMIT BUY GOOG PENDING (treba odobrenje jer needApproval=true)
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, NULL, 3400.0000, 1, NOW(),
+     'BUY', 0, NOW(), 170.0000, 0, 'LIMIT', 170.0000,
+     20, 20, 'PENDING', NULL, 6, 'EMPLOYEE', 3);
+
+-- Maja — SELL AAPL APPROVED (u toku izvrsavanja)
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 950.0000, 1, DATE_SUB(NOW(), INTERVAL 1 DAY),
+     'SELL', 0, NOW(), NULL, 0, 'MARKET', 190.0000,
+     5, 3, 'APPROVED', NULL, 6, 'EMPLOYEE', 1);
+
+-- Tamara (agent, emp_id=4) — BUY MSFT DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 5925.0000, 1, DATE_SUB(NOW(), INTERVAL 9 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 9 DAY), NULL, 0, 'MARKET', 395.0000,
+     15, 0, 'DONE', NULL, 4, 'EMPLOYEE', 2);
+
+-- Djordje (agent, emp_id=5) — BUY AMZN DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'Nikola Milenkovic', 3570.0000, 1, DATE_SUB(NOW(), INTERVAL 7 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 7 DAY), NULL, 0, 'MARKET', 178.5000,
+     20, 0, 'DONE', NULL, 5, 'EMPLOYEE', 6);
+
+-- Marko (admin/supervisor, emp_id=1) — BUY AAPL, MSFT, AMZN DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'No need for approval', 5280.0000, 1, DATE_SUB(NOW(), INTERVAL 14 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 14 DAY), NULL, 0, 'MARKET', 176.0000,
+     30, 0, 'DONE', NULL, 1, 'EMPLOYEE', 1),
+    (NULL, 0, 0, 'No need for approval', 7700.0000, 1, DATE_SUB(NOW(), INTERVAL 12 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 12 DAY), NULL, 0, 'MARKET', 385.0000,
+     20, 0, 'DONE', NULL, 1, 'EMPLOYEE', 2),
+    (NULL, 0, 0, 'No need for approval', 2100.0000, 1, DATE_SUB(NOW(), INTERVAL 11 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 11 DAY), NULL, 0, 'MARKET', 175.0000,
+     12, 0, 'DONE', NULL, 1, 'EMPLOYEE', 6);
+
+-- Jelena (admin/supervisor, emp_id=2) — BUY GOOG, NVDA DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (NULL, 0, 0, 'No need for approval', 5530.0000, 1, DATE_SUB(NOW(), INTERVAL 13 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 13 DAY), NULL, 0, 'MARKET', 158.0000,
+     35, 0, 'DONE', NULL, 2, 'EMPLOYEE', 3),
+    (NULL, 0, 0, 'No need for approval', 4800.0000, 1, DATE_SUB(NOW(), INTERVAL 10 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 10 DAY), NULL, 0, 'MARKET', 800.0000,
+     6, 0, 'DONE', NULL, 2, 'EMPLOYEE', 5);
+
+-- Lazar (klijent) — BUY TSLA, GOOG DONE
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (7, 0, 0, 'No need for approval', 3825.0000, 1, DATE_SUB(NOW(), INTERVAL 6 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 6 DAY), NULL, 0, 'MARKET', 255.0000,
+     15, 0, 'DONE', NULL, 3, 'CLIENT', 4),
+    (7, 0, 0, 'No need for approval', 4800.0000, 1, DATE_SUB(NOW(), INTERVAL 5 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 5 DAY), NULL, 0, 'MARKET', 160.0000,
+     30, 0, 'DONE', NULL, 3, 'CLIENT', 3);
+
+-- Ana (klijent) — BUY NVDA, AAPL DONE + PENDING SELL
+INSERT IGNORE INTO orders (account_id, after_hours, all_or_none, approved_by, approximate_price,
+                           contract_size, created_at, direction, is_done, last_modification,
+                           limit_value, is_margin, order_type, price_per_unit, quantity,
+                           remaining_portions, status, stop_value, user_id, user_role, listing_id)
+VALUES
+    (11, 0, 0, 'No need for approval', 4050.0000, 1, DATE_SUB(NOW(), INTERVAL 8 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 8 DAY), NULL, 0, 'MARKET', 810.0000,
+     5, 0, 'DONE', NULL, 4, 'CLIENT', 5),
+    (11, 0, 0, 'No need for approval', 1750.0000, 1, DATE_SUB(NOW(), INTERVAL 7 DAY),
+     'BUY', 1, DATE_SUB(NOW(), INTERVAL 7 DAY), NULL, 0, 'MARKET', 175.0000,
+     10, 0, 'DONE', NULL, 4, 'CLIENT', 1),
+    (11, 0, 1, NULL, 1900.0000, 1, NOW(),
+     'SELL', 0, NOW(), NULL, 0, 'MARKET', 190.0000,
+     3, 3, 'PENDING', NULL, 4, 'CLIENT', 1);

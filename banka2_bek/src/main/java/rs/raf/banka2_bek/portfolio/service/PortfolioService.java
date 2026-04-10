@@ -5,14 +5,16 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import rs.raf.banka2_bek.auth.model.User;
-import rs.raf.banka2_bek.auth.repository.UserRepository;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.portfolio.dto.PortfolioItemDto;
 import rs.raf.banka2_bek.portfolio.dto.PortfolioSummaryDto;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
+import rs.raf.banka2_bek.tax.model.TaxRecord;
+import rs.raf.banka2_bek.tax.repository.TaxRecordRepository;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -25,17 +27,29 @@ public class PortfolioService {
 
     private final PortfolioRepository portfolioRepository;
     private final ListingRepository listingRepository;
-    private final UserRepository userRepository;
+    private final ClientRepository clientRepository;
+    private final EmployeeRepository employeeRepository;
+    private final TaxRecordRepository taxRecordRepository;
 
     /**
      * Vraca ID trenutno ulogovanog korisnika na osnovu email-a iz JWT-a.
+     * Proverava clients tabelu (klijenti) i employees tabelu (aktuari/zaposleni),
+     * isto kao OrderServiceImpl.resolveCurrentUser().
      */
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String email = auth.getName();
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Korisnik nije pronadjen: " + email));
-        return user.getId();
+
+        // Prvo proveri klijente (clients tabela)
+        var clientOpt = clientRepository.findByEmail(email);
+        if (clientOpt.isPresent()) {
+            return clientOpt.get().getId();
+        }
+
+        // Zatim proveri zaposlene (employees tabela)
+        return employeeRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Korisnik nije pronadjen: " + email))
+                .getId();
     }
 
     /**
@@ -83,13 +97,13 @@ public class PortfolioService {
      * Vraca sumarni pregled portfolija (ukupna vrednost, profit, porez).
      */
     public PortfolioSummaryDto getSummary() {
+        Long userId = getCurrentUserId();
         List<PortfolioItemDto> items = getMyPortfolio();
 
         BigDecimal totalValue = BigDecimal.ZERO;
         BigDecimal totalProfit = BigDecimal.ZERO;
 
         for (PortfolioItemDto item : items) {
-            // totalValue = SUM(currentPrice * quantity)
             BigDecimal itemValue = item.getCurrentPrice()
                     .multiply(BigDecimal.valueOf(item.getQuantity()));
             totalValue = totalValue.add(itemValue);
@@ -102,12 +116,33 @@ public class PortfolioService {
                 ? totalProfit.multiply(taxRate).setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO;
 
+        // Dohvati placeni porez iz TaxRecord-a
+        BigDecimal paidTaxThisYear = BigDecimal.ZERO;
+        String userType = isEmployee(userId) ? "EMPLOYEE" : "CLIENT";
+        Optional<TaxRecord> taxRecord = taxRecordRepository.findByUserIdAndUserType(userId, userType);
+        if (taxRecord.isPresent()) {
+            paidTaxThisYear = taxRecord.get().getTaxPaid() != null
+                    ? taxRecord.get().getTaxPaid() : BigDecimal.ZERO;
+            // Neplacen porez = dugovanje - vec placeno
+            BigDecimal taxOwed = taxRecord.get().getTaxOwed() != null
+                    ? taxRecord.get().getTaxOwed() : BigDecimal.ZERO;
+            BigDecimal remaining = taxOwed.subtract(paidTaxThisYear);
+            unpaidTax = remaining.compareTo(BigDecimal.ZERO) > 0
+                    ? remaining.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        }
+
         return new PortfolioSummaryDto(
                 totalValue.setScale(2, RoundingMode.HALF_UP),
                 totalProfit.setScale(2, RoundingMode.HALF_UP),
-                BigDecimal.ZERO, // paidTaxThisYear — nema istorije transakcija
+                paidTaxThisYear.setScale(2, RoundingMode.HALF_UP),
                 unpaidTax
         );
+    }
+
+    private boolean isEmployee(Long userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_EMPLOYEE".equals(a.getAuthority()) || "ROLE_ADMIN".equals(a.getAuthority()));
     }
 
     /**

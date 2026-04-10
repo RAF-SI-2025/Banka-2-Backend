@@ -10,8 +10,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import rs.raf.banka2_bek.auth.model.User;
-import rs.raf.banka2_bek.auth.repository.UserRepository;
+import rs.raf.banka2_bek.client.model.Client;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.portfolio.dto.PortfolioItemDto;
 import rs.raf.banka2_bek.portfolio.dto.PortfolioSummaryDto;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
@@ -19,6 +20,7 @@ import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
+import rs.raf.banka2_bek.tax.repository.TaxRecordRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -41,7 +43,9 @@ class PortfolioServiceTest {
 
     @Mock private PortfolioRepository portfolioRepository;
     @Mock private ListingRepository listingRepository;
-    @Mock private UserRepository userRepository;
+    @Mock private ClientRepository clientRepository;
+    @Mock private EmployeeRepository employeeRepository;
+    @Mock private TaxRecordRepository taxRecordRepository;
 
     @InjectMocks
     private PortfolioService portfolioService;
@@ -52,15 +56,16 @@ class PortfolioServiceTest {
     }
 
     private void authenticateAs(String email, Long userId) {
-        User user = new User();
-        user.setId(userId);
-        user.setEmail(email);
-        user.setFirstName("Test");
-        user.setLastName("User");
+        Client client = Client.builder()
+                .id(userId)
+                .email(email)
+                .firstName("Test")
+                .lastName("User")
+                .build();
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(email, null, List.of()));
-        lenient().when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+        lenient().when(clientRepository.findByEmail(email)).thenReturn(Optional.of(client));
     }
 
     private Portfolio buildPortfolio(Long id, Long userId, Long listingId, String ticker,
@@ -353,7 +358,8 @@ class PortfolioServiceTest {
         void userNotFound() {
             SecurityContextHolder.getContext().setAuthentication(
                     new UsernamePasswordAuthenticationToken("nonexistent@test.com", null, List.of()));
-            when(userRepository.findByEmail("nonexistent@test.com")).thenReturn(Optional.empty());
+            when(clientRepository.findByEmail("nonexistent@test.com")).thenReturn(Optional.empty());
+            when(employeeRepository.findByEmail("nonexistent@test.com")).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> portfolioService.getMyPortfolio())
                     .isInstanceOf(RuntimeException.class)
