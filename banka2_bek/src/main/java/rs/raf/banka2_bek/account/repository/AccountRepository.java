@@ -62,8 +62,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber")
     List<Account> findBankAccounts(@Param("regNumber") String regNumber);
 
-    @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber AND a.currency.id = :currencyId AND a.status = 'ACTIVE'")
-    Optional<Account> findBankAccountByCurrencyId(@Param("regNumber") String regNumber, @Param("currencyId") Long currencyId);
+    @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber AND a.currency.id = :currencyId AND a.status = 'ACTIVE' ORDER BY a.id ASC")
+    java.util.List<Account> findBankAccountsByCurrencyId(@Param("regNumber") String regNumber, @Param("currencyId") Long currencyId);
+
+    default Optional<Account> findBankAccountByCurrencyId(String regNumber, Long currencyId) {
+        return findBankAccountsByCurrencyId(regNumber, currencyId).stream().findFirst();
+    }
 
     @Modifying
     @Query("UPDATE Account a SET a.dailySpending = 0")
