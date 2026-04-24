@@ -47,6 +47,9 @@ class LoanControllerCoverageTest {
                 .standaloneSetup(loanController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+        // Clear prvo da bi se obezbedila izolacija od prethodnih testova
+        // (CI filesystem test order moze dovesti do leakovanog SecurityContext-a).
+        SecurityContextHolder.clearContext();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("klijent@example.com", null));
     }
@@ -81,7 +84,9 @@ class LoanControllerCoverageTest {
     @Test
     @DisplayName("POST /loans/1/early-repayment sa UserDetails principal-om - 200 OK")
     void earlyRepayment_withUserDetailsPrincipal_success() throws Exception {
-        // Covers the UserDetails branch in getEmail()
+        // Covers the UserDetails branch in getEmail().
+        // Clear + set da bi se zamenio principal postavljen u @BeforeEach.
+        SecurityContextHolder.clearContext();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         User.withUsername("ud@example.com").password("x").authorities("USER").build(),

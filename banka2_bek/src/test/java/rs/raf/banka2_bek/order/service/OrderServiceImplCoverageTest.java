@@ -111,6 +111,10 @@ class OrderServiceImplCoverageTest {
 
     @BeforeEach
     void setUp() {
+        // Clear pre svakog testa da se eliminise leak SecurityContext-a
+        // iz prethodnih test klasa (CI filesystem order nije deterministican).
+        SecurityContextHolder.clearContext();
+
         testClient = new Client();
         testClient.setId(42L);
         testClient.setEmail("client@test.com");
