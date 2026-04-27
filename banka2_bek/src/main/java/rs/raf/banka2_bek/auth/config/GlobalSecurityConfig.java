@@ -23,9 +23,11 @@ import java.util.List;
 public class GlobalSecurityConfig  {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final InterbankAuthFilter interbankAuthFilter;
 
-    public GlobalSecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public GlobalSecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, InterbankAuthFilter interbankAuthFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.interbankAuthFilter = interbankAuthFilter;
     }
 
     @Bean
@@ -100,7 +102,8 @@ public class GlobalSecurityConfig  {
                         // TODO: kad se implementira ApiKey filter (registrovan kao
                         //       jwtAuthenticationFilter alternativa za ove pathove),
                         //       zameniti permitAll sa custom matcher-om koji preskace JWT.
-                        .requestMatchers("/interbank/**", "/negotiations/**",
+                        .requestMatchers("/interbank/**").hasAuthority("ROLE_INTERBANK")
+                        .requestMatchers( "/negotiations/**",
                                 "/public-stock", "/user/*/**").permitAll()
                         .anyRequest().authenticated()
                 )
@@ -110,6 +113,7 @@ public class GlobalSecurityConfig  {
                 .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
         )
+                .addFilterBefore(interbankAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
 
