@@ -56,26 +56,41 @@ public class BankRoutingService {
 
     public int myRoutingNumber() {
         // TODO: validacija da properties.myRoutingNumber nije null
-        throw new UnsupportedOperationException("TODO: implementirati BankRoutingService.myRoutingNumber");
+        if(properties.getMyRoutingNumber() == null)
+        {
+            throw new IllegalArgumentException("myRoutingNumber is not configured");
+        }
+        return properties.getMyRoutingNumber();
     }
 
     public int parseRoutingNumber(String accountNumber) {
         // TODO: uzmi prve 3 cifre, parseInt
-        throw new UnsupportedOperationException("TODO: implementirati BankRoutingService.parseRoutingNumber");
+        if(accountNumber == null || accountNumber.length() < 3)
+        {
+            throw new IllegalArgumentException("Account number must have at least 3 digits");
+        }
+
+        try {
+            return Integer.parseInt(accountNumber.substring(0,3));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Account number must start with 3 digits");
+        }
+
     }
 
     public boolean isLocalAccount(String accountNumber) {
         // TODO: parseRoutingNumber + uporedi sa myRoutingNumber
-        throw new UnsupportedOperationException("TODO: implementirati BankRoutingService.isLocalAccount");
+        return parseRoutingNumber(accountNumber) == myRoutingNumber();
     }
 
     public Optional<InterbankProperties.PartnerBank> resolvePartner(String accountNumber) {
         // TODO: parseRoutingNumber + delegate na resolvePartnerByRouting
-        throw new UnsupportedOperationException("TODO: implementirati BankRoutingService.resolvePartner");
+        return resolvePartnerByRouting(parseRoutingNumber(accountNumber));
+
     }
 
     public Optional<InterbankProperties.PartnerBank> resolvePartnerByRouting(int routingNumber) {
         // TODO: properties.partners.stream().filter(p -> p.routingNumber == routingNumber).findFirst()
-        throw new UnsupportedOperationException("TODO: implementirati BankRoutingService.resolvePartnerByRouting");
+        return properties.getPartners().stream().filter(p -> p.getRoutingNumber() == routingNumber).findFirst();
     }
 }
