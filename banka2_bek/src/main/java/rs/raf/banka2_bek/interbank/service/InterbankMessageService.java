@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.interbank.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.jackson.autoconfigure.JacksonProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -82,6 +83,7 @@ import java.util.UUID;
 ================================================================================
 */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class InterbankMessageService {
 
@@ -92,13 +94,12 @@ public class InterbankMessageService {
 
 
     public Optional<String> findCachedResponse(IdempotenceKey key) {
-        // TODO: §2.2 lookup po (key.routingNumber, key.locallyGeneratedKey)
 
         Optional<InterbankMessage> messageOpt = repository.findBySenderRoutingNumberAndLocallyGeneratedKey(
                 key.routingNumber(),
                 key.locallyGeneratedKey()
         );
-        return messageOpt.map(interbankMessage -> interbankMessage.getDirection().toString());
+        return messageOpt.map(InterbankMessage::getResponseBody);
     }
 
     @Transactional
@@ -125,8 +126,6 @@ public class InterbankMessageService {
                 .retryCount(0).build()
         );
 
-        // TODO: §2.2 upis (key + request + response + status) atomicno
-        throw new UnsupportedOperationException("TODO: implementirati recordInboundResponse");
     }
 
     public IdempotenceKey generateKey() {
@@ -173,7 +172,7 @@ public class InterbankMessageService {
                         key.routingNumber(), key.locallyGeneratedKey()
                 ).orElseThrow(() ->
                         new InterbankExceptions.InterbankProtocolException(
-                                "No outbound message for the key " + key + " was found."
+                                "No outbound message for key " + key + " was found."
                         )
                 );
 
@@ -209,7 +208,9 @@ public class InterbankMessageService {
 
         if (ibMessage.getRetryCount() >= MAX_RETRIES) {
             ibMessage.setStatus(InterbankMessageStatus.STUCK);
-            //loguj error
+
+            log.error("Interbank outbound message STUCK after {} for key={}, error message: {} ", MAX_RETRIES, key, errorMessage);
+
         }
 
         repository.save(ibMessage);
