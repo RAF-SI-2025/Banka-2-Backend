@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.interbank.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.interbank.config.InterbankProperties;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
@@ -47,13 +48,10 @@ import java.util.Optional;
 ================================================================================
 */
 @Service
+@RequiredArgsConstructor
 public class BankRoutingService {
 
     private final InterbankProperties properties;
-
-    public BankRoutingService(InterbankProperties properties) {
-        this.properties = properties;
-    }
 
     public int myRoutingNumber() {
         // TODO: validacija da properties.myRoutingNumber nije null
