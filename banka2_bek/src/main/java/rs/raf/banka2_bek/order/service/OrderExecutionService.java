@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.auth.util.UserRole;
+import rs.raf.banka2_bek.investmentfund.service.FundLiquidationService;
 import rs.raf.banka2_bek.order.model.Order;
 import rs.raf.banka2_bek.order.model.OrderDirection;
 import rs.raf.banka2_bek.order.model.OrderStatus;
@@ -88,6 +89,7 @@ public class OrderExecutionService {
     private final TransactionRepository transactionRepository;
     private final AonValidationService aonValidationService;
     private final FundReservationService fundReservationService;
+    private final FundLiquidationService fundLiquidationService;
 
     @Value("${bank.registration-number}")
     private String bankRegistrationNumber;
@@ -336,6 +338,11 @@ public class OrderExecutionService {
         log.info("Order #{} filled {} of {} @ {} (remaining: {}, orderComm: {}, listingCcy)",
                 order.getId(), fillQuantity, order.getQuantity(),
                 executionPrice, order.getRemainingPortions(), commissionInListing);
+
+        if ("FUND".equals(order.getUserRole())) {
+            log.info("T9 Hook: Detektovan nalog fonda #{}. Pokrecem resolve pending transakcija.", order.getUserId());
+            fundLiquidationService.onFillCompleted(order.getId());
+        }
     }
 
     /**

@@ -31,6 +31,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByStatusAndIsDoneFalse(OrderStatus status);
 
+    List<Order> findByUserIdAndUserRole(Long userId, String userRole);
     @Query("SELECT o FROM Order o WHERE o.isDone = false " +
            "AND o.status IN (rs.raf.banka2_bek.order.model.OrderStatus.PENDING, " +
            "rs.raf.banka2_bek.order.model.OrderStatus.APPROVED)")
