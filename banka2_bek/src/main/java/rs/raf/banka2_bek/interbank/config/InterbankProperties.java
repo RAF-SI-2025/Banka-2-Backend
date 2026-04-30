@@ -3,9 +3,11 @@ package rs.raf.banka2_bek.interbank.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /*
 ================================================================================
@@ -40,6 +42,7 @@ import java.util.List;
   (sta saljemo mi) + inboundToken (sta verifikujemo mi).
 ================================================================================
 */
+@Component
 @Configuration
 @ConfigurationProperties(prefix = "interbank")
 @Data
@@ -70,5 +73,9 @@ public class InterbankProperties {
 
         /** Token koji mi izdajemo partner banci; verifikujemo ga u X-Api-Key headeru. */
         private String inboundToken;
+    }
+
+    public Optional<PartnerBank> findByApiKey(String apiKey) {
+        return partners.stream().filter(p -> p.getInboundToken().equals(apiKey)).findFirst();
     }
 }
