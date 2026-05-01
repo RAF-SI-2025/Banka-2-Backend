@@ -1,0 +1,5 @@
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+wikipedia==1.4.0
+pydantic==2.10.4
+cachetools==7.0.6

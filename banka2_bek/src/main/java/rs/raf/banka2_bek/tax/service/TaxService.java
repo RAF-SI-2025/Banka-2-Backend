@@ -119,13 +119,17 @@ public class TaxService {
      * strikePrice za prodavca i kao kupovinu po strikePrice za kupca; dodatno
      * primljena/placena premija ulazi u sell/buy stranu kao realizovani prihod
      * odnosno trosak vezan za listing. Intra-bank OTC pokriva samo akcije.
+     *
+     * FUND orderi (Celina 4 - Nova): orderi sa fundId != null se preskacu jer
+     * fondovi ne ulaze u licnu kapitalnu dobit supervizora.
      */
     @Transactional
     public void calculateTaxForAllUsers() {
         LocalDateTime now = LocalDateTime.now();
         List<Order> allDoneOrders = orderRepository.findByIsDoneTrue().stream()
                 .filter(o -> o.getListing() != null
-                        && TAXABLE_LISTING_TYPES.contains(o.getListing().getListingType()))
+                        && TAXABLE_LISTING_TYPES.contains(o.getListing().getListingType())
+                        && o.getFundId() == null)  // Preskoci fond-ordere
                 .collect(Collectors.toList());
 
         // TODO (Celina 3 — opcije, Celina 4 — inter-bank OTC):

@@ -1,0 +1,181 @@
+# Arbitro AI assistant stack — POTPUNO ODVOJEN od Banka-2-Backend compose-a.
+#
+# Ko zeli AI asistenta:
+#   cd Banka-2-Backend/Banka-2-Tools
+#   docker compose up -d
+#
+# Ko ne zeli (npr. demo bez asistenta, slabija masina, sporija mreza):
+#   ne pokrece nista — BE radi normalno, /assistant/health vraca
+#   llmReachable=false i FE FAB prikazuje "Offline" badge.
+#
+# BE (banka2_backend kontejner) pristupa Arbitro servisima preko
+# `host.docker.internal:PORT` (Docker Desktop / Linux sa host-gateway alias-om).
+# Tako su 2 compose stack-a potpuno nezavisna — ne dele network niti
+# depends_on graf.
+#
+# GPU PASSTHROUGH (CUDA): aktiviraj sa override fajlom:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Bez GPU-a: Ollama radi na CPU (5-15 tok/s na modernom CPU-u).
+# Mac Apple Silicon: pokreni Ollama van Docker-a, samo wikipedia + rag su u stack-u.
+
+services:
+  # Ollama LLM (Gemma 4 E4B) — auto-pull pri prvom startu, kesirano u volume
+  ollama:
+    image: ollama/ollama:latest
+    container_name: banka2_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: 24h
+      # === FORCE 100% GPU OFFLOAD (svi layeri u VRAM, nikad CPU split) ===
+      # Bez ovih, Ollama auto-split-uje pri prvom load-u zavisno od free
+      # VRAM-a u tom trenutku — desktop/Chrome/drugi procesi mu ukradu
+      # 1-2GB pa model padne na 26-30% GPU offload (3GB VRAM-a, 70% CPU).
+      # Sa OLLAMA_NUM_GPU=999 + OVERHEAD=0 + FLASH_ATTN + Q8 KV cache,
+      # cela Gemma 4 E2B (5.1GB Q4 + KV) staje u 8GB i radi 100% na GPU.
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_GPU_OVERHEAD: "0"
+      OLLAMA_NUM_GPU: "999"
+      # Sched spread = ne tovari layer-e na vise GPU-ova ako ih ima vise;
+      # ovde ima samo 1 GPU pa svi idu tu, ali za svaki slucaj.
+      OLLAMA_SCHED_SPREAD: "false"
+      # Smanji broj paralelnih request-ova — sa 1 nemamo veci VRAM
+      # footprint pri konkurentnim chat-ovima.
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Eksplicitan default context length — 4096 tokena (umesto 0=unlimited
+      # koji rezervise mnogo VRAM-a za rast KV cache-a). Gemma 4 E2B podrzava
+      # 128K, ali nam za chat treba samo nekoliko hiljada.
+      OLLAMA_CONTEXT_LENGTH: "4096"
+      # CUDA force — explicit GPU 0
+      CUDA_VISIBLE_DEVICES: "0"
+    # GPU passthrough — Docker Desktop (Win/Mac WSL2) i Linux native sa
+    # NVIDIA Container Toolkit. Ako kontejner ne nadje GPU, gracefully
+    # padaj na CPU (ne crash-uje, samo `library=cpu` u logu).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      # Generican grep na "gemma4" znaci bilo koji gemma4 tag (e2b/e4b/26b/31b)
+      # — Luka moze da menja model kroz `OLLAMA_PULL_MODEL` env var ispod.
+      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q gemma && curl -fsS http://localhost:11434/api/tags >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 600s
+    restart: unless-stopped
+
+  # Pomocni one-shot kontejner — pull-uje model pri prvom startu pa zavrsava.
+  # Default je `gemma4:e2b` (7.2GB) jer staje cela u 8GB VRAM (RTX 4070 Laptop).
+  # Veci `gemma4:e4b` (9.6GB) trazi 12GB+ VRAM-a inace ide split CPU/GPU.
+  # Override-uj preko env var-a:
+  #   OLLAMA_PULL_MODEL=gemma3:4b docker compose up -d   (3.3GB, najbrzi)
+  #   OLLAMA_PULL_MODEL=gemma4:e4b docker compose up -d  (9.6GB, najmocniji)
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: banka2_ollama_pull
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_HOST: ollama:11434
+      OLLAMA_PULL_MODEL: ${OLLAMA_PULL_MODEL:-gemma4:e2b}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Cekam Ollama API..."
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+          ollama list >/dev/null 2>&1 && break
+          echo "  pokusaj $$i — Ollama jos nije spremna, cekam 5s..."
+          sleep 5
+        done
+        if ollama list 2>/dev/null | grep -q "$$OLLAMA_PULL_MODEL"; then
+          echo "Model $$OLLAMA_PULL_MODEL vec pull-ovan, preskacem."
+        else
+          echo "Pull-ujem $$OLLAMA_PULL_MODEL — prvi put traje 5-15min..."
+          ollama pull "$$OLLAMA_PULL_MODEL"
+          echo "$$OLLAMA_PULL_MODEL uspesno pull-ovan."
+        fi
+        # ===== FORCE 100% GPU OFFLOAD =====
+        # Ollama 0.5+ je uklonio OLLAMA_NUM_GPU kao server env var, sad
+        # mora ici kroz Modelfile PARAMETER ili request options.num_gpu.
+        # Kreiramo derived model "gemma4:e2b-gpu" sa num_gpu=999 koji
+        # forsira svih 36 layer-a u VRAM. Bez ovoga, Ollama auto-split-uje
+        # zavisno od free VRAM-a u tom trenutku (3GB umesto 8GB).
+        DERIVED_MODEL="$${OLLAMA_PULL_MODEL%%:*}:$${OLLAMA_PULL_MODEL##*:}-gpu"
+        if ollama list 2>/dev/null | grep -q "$$DERIVED_MODEL"; then
+          echo "Derived model $$DERIVED_MODEL vec postoji."
+        else
+          echo "Kreiram $$DERIVED_MODEL sa PARAMETER num_gpu 999 (full VRAM offload)..."
+          cat > /tmp/Modelfile.gpu << EOF
+        FROM $$OLLAMA_PULL_MODEL
+        PARAMETER num_gpu 999
+        PARAMETER num_ctx 4096
+        EOF
+          ollama create "$$DERIVED_MODEL" -f /tmp/Modelfile.gpu
+          echo "$$DERIVED_MODEL kreiran — svi layeri ce ici na GPU."
+        fi
+    depends_on:
+      - ollama
+    restart: "no"
+
+  # Wikipedia sidecar (FastAPI + wikipedia 1.4 + cachetools TTL 1h)
+  wikipedia-tool:
+    build: ./wikipedia-service
+    container_name: banka2_wikipedia_tool
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  # RAG sidecar (FastAPI + sentence-transformers + ChromaDB).
+  # Auto-indeksira spec dokumente pri prvom startu. Spec mount path je
+  # relativno ka Banka-2-Tools (../.. = projekat root, pa "Info o predmetu").
+  rag-tool:
+    build: ./rag-service
+    container_name: banka2_rag_tool
+    ports:
+      - "8091:8091"
+    volumes:
+      - "../../Info o predmetu:/app/data:ro"
+      - chroma_persist:/app/chroma_db
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ ! -f /app/chroma_db/.indexed ]; then
+          echo 'Indeksiranje spec dokumenata u ChromaDB (~30-60s)...'
+          python scripts/index_specs.py && touch /app/chroma_db/.indexed
+          echo 'Indeksiranje zavrseno.'
+        else
+          echo 'ChromaDB indeks vec postoji, preskacem indeksiranje.'
+        fi
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8091
+    restart: unless-stopped
+
+  # Phase 5 — Kokoro-82M TTS sidecar (Apache 2.0). Lokalno hostovan, ~330MB
+  # na disku (FP32). Real-time factor 0.05x na GPU, 0.3x na CPU. Default voice
+  # `af_bella` (US English F). Override preko KOKORO_DEFAULT_VOICE env var-a.
+  # Phonemizer dep: espeak-ng instaliran u Dockerfile-u kao fallback.
+  kokoro-tts:
+    build: ./kokoro-tts
+    container_name: banka2_kokoro_tts
+    ports:
+      - "8092:8092"
+    volumes:
+      - kokoro_cache:/app/hf_cache
+    environment:
+      KOKORO_DEFAULT_VOICE: af_bella
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  chroma_persist:
+  kokoro_cache:

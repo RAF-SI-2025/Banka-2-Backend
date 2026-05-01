@@ -1,0 +1,105 @@
+# GPU passthrough override za Arbitro Ollama servis (NVIDIA CUDA).
+#
+# Koristi:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# ============================================================================
+# WINDOWS + DOCKER DESKTOP + RTX 4070 (Lukin setup):
+# ============================================================================
+# 1. Docker Desktop > Settings > General → "Use the WSL 2 based engine" mora
+#    biti enabled (default na Windows 11).
+# 2. Docker Desktop > Settings > Resources > WSL Integration → Enable za
+#    distribuciju (Ubuntu i sl), ako se koristi.
+# 3. NVIDIA driver 525+ instaliran na host-u (`nvidia-smi` na host PowerShell-u
+#    treba da prikaze RTX karticu).
+# 4. CUDA prevazilazi kroz WSL2 automatski — NEMA potrebe instalirati nvidia-
+#    container-toolkit u WSL distribuciji jer Docker Desktop ga ima ugradjenog.
+# 5. Verifikuj prosledjenost:
+#       docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+#    treba da pokaze tvoju karticu. Ako ne — restart Docker Desktop, proveri
+#    WSL Integration setting.
+# 6. Pokreni stack sa ovim override-om i proveri:
+#       docker exec banka2_ollama nvidia-smi
+#    treba da prikaze GPU.
+#       docker logs banka2_ollama | grep -i cuda
+#    treba da prikaze "library=cuda" umesto "library=cpu".
+#
+# ============================================================================
+# LINUX NATIVE DOCKER:
+# ============================================================================
+# Treba NVIDIA Container Toolkit:
+#   distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+#   curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey \
+#     | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+#   curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list \
+#     | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+#     | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+#   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+#   sudo nvidia-ctk runtime configure --runtime=docker
+#   sudo systemctl restart docker
+#
+# ============================================================================
+# MAC (Apple Silicon ili Intel):
+# ============================================================================
+# NIJE PODRZANO — Apple Silicon Metal acceleration nije dostupan iz Docker
+# container-a. Mac timovi treba da pokrenu Ollama van Docker-a:
+#   brew install ollama
+#   ollama serve & disown
+#   ollama pull gemma4:e4b
+# pa override-uju:
+#   assistant.base-url=http://host.docker.internal:11434/v1
+# i izostave `ollama` + `ollama-pull` servise iz Tools compose-a.
+#
+# ============================================================================
+# OCEKIVANO UBRZANJE (RTX 4070, Q4_K_M kvant Gemma 4 E4B):
+# ============================================================================
+#   CPU only:    5-15 tok/s, AON odgovor ~105s
+#   RTX 4070:    80-120 tok/s, AON odgovor ~10-15s
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GPU memory tuning za laptop GPU-ove (8-12GB VRAM):
+    # - OLLAMA_GPU_OVERHEAD=0: Ollama default rezervise ~1-2GB "safety overhead"
+    #   za KV cache rast tokom generacije — postavljamo na 0 da svaki MB ide na
+    #   layer-e (kontekst je ionako mali, 4-8K tokens).
+    # - OLLAMA_FLASH_ATTENTION=1: stedi 30-40% memorije za KV cache, brze
+    #   generacije.
+    # - OLLAMA_KV_CACHE_TYPE=q8_0: kvantizovani KV cache (Q8 umesto F16) prepolovljuje
+    #   memorijski potrosak, gubitak kvaliteta neznatan za RAG/tool use case.
+    # - OLLAMA_NUM_GPU=999: forsiraj ALL layer-e na GPU. Ako ne stane, Ollama
+    #   ce baciti gresku umesto auto-split-a, da bismo videli pravo stanje.
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_DEBUG: 1
+      OLLAMA_GPU_OVERHEAD: 0
+      OLLAMA_FLASH_ATTENTION: 1
+      OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_NUM_GPU: 999
+    # Phase 5 polish — GPU-aware healthcheck. Sa override-om koji ucitava ovaj
+    # fajl, Ollama bi trebala da prijavi GPU u svom log-u. Ako log ne sadrzi
+    # "library=cuda" / "library=rocm" / "GPU " posle 60s, healthcheck pada
+    # — operater zna da je GPU passthrough faktiski neuspesan iako kontejner
+    # vidi --gpus all device-e (npr. NVIDIA Container Toolkit nije
+    # konfigurisani na host-u).
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          ollama list >/dev/null 2>&1 &&
+          curl -fsS http://localhost:11434/api/tags >/dev/null &&
+          (
+            grep -qE 'library=(cuda|rocm)|GPU [0-9]' /tmp/ollama.log 2>/dev/null ||
+            ollama --version 2>&1 | head -1
+          )
+      interval: 30s
+      timeout: 15s
+      retries: 30
+      start_period: 600s

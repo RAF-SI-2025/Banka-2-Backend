@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.auth.util.UserRole;
+import rs.raf.banka2_bek.investmentfund.service.FundLiquidationService;
 import rs.raf.banka2_bek.order.model.Order;
 import rs.raf.banka2_bek.order.model.OrderDirection;
 import rs.raf.banka2_bek.order.model.OrderStatus;
@@ -88,6 +89,7 @@ public class OrderExecutionService {
     private final TransactionRepository transactionRepository;
     private final AonValidationService aonValidationService;
     private final FundReservationService fundReservationService;
+    private final FundLiquidationService fundLiquidationService;
 
     @Value("${bank.registration-number}")
     private String bankRegistrationNumber;
@@ -281,8 +283,13 @@ public class OrderExecutionService {
             // Prihod (totalPrice - commission) ide na racun naloga (reservedAccountId).
             // Za klijenta sa razlicitom valutom racuna, jos 1% bankovske menjacnice
             // se skida pre isplate (spec: "prilikom konverzije uzimamo proviziju").
+
+            // Za fond-ordere: portfolio je u FUND porfoliju, ne u supervizora
+            Long sellPortfolioUserId = order.getFundId() != null ? order.getFundId() : order.getUserId();
+            String sellPortfolioUserRole = order.getFundId() != null ? UserRole.FUND : order.getUserRole();
+
             Portfolio portfolio = portfolioRepository
-                    .findByUserIdAndUserRole(order.getUserId(), order.getUserRole()).stream()
+                    .findByUserIdAndUserRole(sellPortfolioUserId, sellPortfolioUserRole).stream()
                     .filter(p -> p.getListingId().equals(order.getListing().getId()))
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(
@@ -336,6 +343,11 @@ public class OrderExecutionService {
         log.info("Order #{} filled {} of {} @ {} (remaining: {}, orderComm: {}, listingCcy)",
                 order.getId(), fillQuantity, order.getQuantity(),
                 executionPrice, order.getRemainingPortions(), commissionInListing);
+
+        if ("FUND".equals(order.getUserRole())) {
+            log.info("T9 Hook: Detektovan nalog fonda #{}. Pokrecem resolve pending transakcija.", order.getUserId());
+            fundLiquidationService.onFillCompleted(order.getId());
+        }
     }
 
     /**
@@ -372,8 +384,12 @@ public class OrderExecutionService {
             if (order.getDirection() == OrderDirection.BUY) {
                 fundReservationService.releaseForBuy(order);
             } else {
+                // Za fond-ordere: traži portfolio u FUND portfoliju, ne u supervizora
+                Long sellPortfolioUserId = order.getFundId() != null ? order.getFundId() : order.getUserId();
+                String sellPortfolioUserRole = order.getFundId() != null ? UserRole.FUND : order.getUserRole();
+
                 Portfolio portfolio = portfolioRepository
-                        .findByUserIdAndUserRole(order.getUserId(), order.getUserRole()).stream()
+                        .findByUserIdAndUserRole(sellPortfolioUserId, sellPortfolioUserRole).stream()
                         .filter(p -> p.getListingId().equals(order.getListing().getId()))
                         .findFirst()
                         .orElse(null);
@@ -436,10 +452,17 @@ public class OrderExecutionService {
      * Azurira portfolio nakon BUY fill-a. SELL fillovi NE prolaze ovuda — oni
      * se obradjuju kroz {@link FundReservationService#consumeForSellFill}.
      * Zato ovde tretiramo samo BUY (quantity > 0).
+     *
+     * Za fond-ordere (fundId != null), hartije se stavljaju u FUND portfolio,
+     * ne u portfolio supervizora.
      */
     private void updatePortfolio(Order order, int quantity, BigDecimal price) {
+        // Za fond-ordere: koristi fundId i "FUND" ulogu
+        Long portfolioUserId = order.getFundId() != null ? order.getFundId() : order.getUserId();
+        String portfolioUserRole = order.getFundId() != null ? UserRole.FUND : order.getUserRole();
+
         Optional<Portfolio> existing = portfolioRepository
-                .findByUserIdAndUserRole(order.getUserId(), order.getUserRole())
+                .findByUserIdAndUserRole(portfolioUserId, portfolioUserRole)
                 .stream()
                 .filter(p -> p.getListingId().equals(order.getListing().getId()))
                 .findFirst();
@@ -459,8 +482,8 @@ public class OrderExecutionService {
             portfolioRepository.save(portfolio);
         } else {
             Portfolio portfolio = new Portfolio();
-            portfolio.setUserId(order.getUserId());
-            portfolio.setUserRole(order.getUserRole());
+            portfolio.setUserId(portfolioUserId);
+            portfolio.setUserRole(portfolioUserRole);
             portfolio.setListingId(order.getListing().getId());
             portfolio.setListingTicker(order.getListing().getTicker());
             portfolio.setListingName(order.getListing().getName());

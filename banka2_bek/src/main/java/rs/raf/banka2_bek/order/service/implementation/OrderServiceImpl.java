@@ -199,6 +199,9 @@ public class OrderServiceImpl implements OrderService {
         order.setAfterHours(afterHours);
         if (fund != null) {
             order.setFundId(fund.getId());
+            // Za fond-ordere: userId je fundId i userRole je "FUND" (ne supervizora)
+            order.setUserId(fund.getId());
+            order.setUserRole(UserRole.FUND);
         }
 
         if (direction == OrderDirection.BUY) {

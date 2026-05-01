@@ -7,7 +7,11 @@ services:
       POSTGRES_USER: banka2user
       POSTGRES_PASSWORD: banka2pass
     ports:
-      - "5433:5432"
+      # 5433 je rezervisan od Hyper-V port range-a na nekim Windows masinama —
+      # 6433 host-side mapira na 5432 u kontejneru. BE komunicira preko Docker
+      # network-a (db:5432), pa host port utice samo na host pristup (Adminer
+      # ce raditi preko ADMINER_DEFAULT_SERVER=db, ne preko host port-a).
+      - "6433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -40,6 +44,14 @@ services:
       SPRING_JPA_SHOW_SQL: "false"
       SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
       SPRING_JPA_PROPERTIES_HIBERNATE_TYPE_PREFERRED_BOOLEAN_JDBC_TYPE: INTEGER
+    # host.docker.internal alias za pristup host portovima (Linux native Docker
+    # zahteva eksplicitan host-gateway alias; Docker Desktop ima nativno).
+    # Koristi se SAMO za opcioni Arbitro stack u Banka-2-Tools/docker-compose.yml
+    # — BE pravi HTTP poziv na localhost:11434 / 8090 / 8091 ako je taj stack up.
+    # Ako Arbitro stack nije pokrenut, pozivi puknu sa connection-refused i
+    # /assistant/health vraca llmReachable=false (gracefuly).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
