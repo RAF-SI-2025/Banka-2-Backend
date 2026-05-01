@@ -1,5 +1,7 @@
 package rs.raf.banka2_bek.interbank.protocol;
 
+import lombok.Getter;
+
 /**
  * Spec ref: protokol §2.9 Message exchange + §2.11 Sending messages
  *
