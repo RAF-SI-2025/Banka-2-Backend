@@ -41,6 +41,9 @@ public final class UserRole {
     /** Spring Security authority prefix za CLIENT rolu. */
     public static final String ROLE_CLIENT = "ROLE_CLIENT";
 
+    /** Spring Security authority prefix za FUND rolu. */
+    public static final String FUND = "FUND";
+
     public static boolean isEmployee(String role) {
         return EMPLOYEE.equals(role);
     }
