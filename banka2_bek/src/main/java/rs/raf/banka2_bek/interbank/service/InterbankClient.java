@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import rs.raf.banka2_bek.interbank.config.InterbankProperties;
@@ -15,7 +16,9 @@ import rs.raf.banka2_bek.interbank.exception.InterbankExceptions.InterbankAuthEx
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions.InterbankCommunicationException;
 import rs.raf.banka2_bek.interbank.protocol.*;
 
+import java.net.http.HttpClient;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /*
 ================================================================================
@@ -105,18 +108,18 @@ public class InterbankClient {
     private final InterbankProperties properties;
     private final BankRoutingService routing;
     private final InterbankMessageService messageService;
-    private final RestClient restClient;
     private final ObjectMapper objectMapper;
+
+    // Keš RestClient instanci po baseUrl – jedna instanca po partneru (connection pool)
+    private final ConcurrentHashMap<String, RestClient> clientCache = new ConcurrentHashMap<>();
 
     public InterbankClient(InterbankProperties properties,
                            BankRoutingService routing,
                            InterbankMessageService messageService,
-                           RestClient restClient,
                            ObjectMapper objectMapper) {
         this.properties = properties;
         this.routing = routing;
         this.messageService = messageService;
-        this.restClient = restClient;
         this.objectMapper = objectMapper;
     }
 
@@ -130,11 +133,10 @@ public class InterbankClient {
                                         Class<Resp> responseType) {
 
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(targetRoutingNumber);
-        String url = partner.getBaseUrl() + "/interbank";
         IdempotenceKey key = envelope.idempotenceKey();
-
         String bodyJson = serializeQuietly(envelope);
 
+        // Upis u audit log PRE slanja – idempotency ključ se zadržava pri retry-u (§2.2)
         messageService.recordOutbound(
                 key,
                 targetRoutingNumber,
@@ -147,9 +149,9 @@ public class InterbankClient {
                 key.routingNumber(), key.locallyGeneratedKey());
 
         try {
-            ResponseEntity<Resp> response = restClient.post()
-                    .uri(url)
-                    .headers(h -> h.set("X-Api-Key", partner.getOutboundToken()))
+            ResponseEntity<Resp> response = buildClient(partner.getBaseUrl(), partner.getOutboundToken())
+                    .post()
+                    .uri("/interbank")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(envelope)
                     .retrieve()
@@ -206,11 +208,9 @@ public class InterbankClient {
         String url = partner.getBaseUrl() + "/public-stock";
 
         try {
-            return  RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            return buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .get()
+                    .uri("/public-stock")
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
                         if (res.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
@@ -236,14 +236,11 @@ public class InterbankClient {
 
     public ForeignBankId postNegotiation(int routingNumber, OtcOffer offer) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(routingNumber);
-        String url = partner.getBaseUrl() + "/negotiations";
 
         try {
-            return RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            return buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .post()
+                    .uri("/negotiations")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(offer)
                     .retrieve()
@@ -271,14 +268,11 @@ public class InterbankClient {
 
     public void putCounterOffer(ForeignBankId negotiationId, OtcOffer offer) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(negotiationId.routingNumber());
-        String url = buildNegotiationUrl(partner.getBaseUrl(), negotiationId);
 
         try {
-            RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .put()
+                    .uri("/negotiations/{rn}/{id}", negotiationId.routingNumber(), negotiationId.id())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(offer)
                     .retrieve()
@@ -306,14 +300,11 @@ public class InterbankClient {
 
     public OtcNegotiation getNegotiation(ForeignBankId negotiationId) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(negotiationId.routingNumber());
-        String url = buildNegotiationUrl(partner.getBaseUrl(), negotiationId);
 
         try {
-            return  RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            return buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .get()
+                    .uri("/negotiations/{rn}/{id}", negotiationId.routingNumber(), negotiationId.id())
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
                         if (res.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
@@ -339,14 +330,11 @@ public class InterbankClient {
 
     public void deleteNegotiation(ForeignBankId negotiationId) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(negotiationId.routingNumber());
-        String url = buildNegotiationUrl(partner.getBaseUrl(), negotiationId);
 
         try {
-            RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .delete()
+                    .uri("/negotiations/{rn}/{id}", negotiationId.routingNumber(), negotiationId.id())
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
                         if (res.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
@@ -372,16 +360,13 @@ public class InterbankClient {
 
     public void acceptNegotiation(ForeignBankId negotiationId) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(negotiationId.routingNumber());
-        String url = buildNegotiationUrl(partner.getBaseUrl(), negotiationId) + "/accept";
 
         log.info("[InterbankClient] acceptNegotiation – čekam COMMITTED. negotiationId={}", negotiationId);
 
         try {
-            RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .get()
+                    .uri("/negotiations/{rn}/{id}/accept", negotiationId.routingNumber(), negotiationId.id())
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
                         if (res.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
@@ -407,14 +392,11 @@ public class InterbankClient {
 
     public UserInformation getUserInfo(ForeignBankId userId) {
         InterbankProperties.PartnerBank partner = resolvePartnerOrThrow(userId.routingNumber());
-        String url = partner.getBaseUrl() + "/user/" + userId.routingNumber() + "/" + userId.id();
 
         try {
-            return RestClient.builder()
-                    .baseUrl(url)
-                    .defaultHeader("X-Api-Key", partner.getOutboundToken())
-                    .build()
+            return buildClient(partner.getBaseUrl(), partner.getOutboundToken())
                     .get()
+                    .uri("/user/{rn}/{id}", userId.routingNumber(), userId.id())
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
                         if (res.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
@@ -437,6 +419,25 @@ public class InterbankClient {
     // =========================================================================
     // Interni helperi
     // =========================================================================
+
+    /**
+     * Vraća keširanu RestClient instancu za dati baseUrl.
+     * Jedna instanca po partneru – connection pool se deli.
+     * HTTP/1.1 je eksplicitno postavljen za kompatibilnost sa WireMock i partnerima.
+     */
+    private RestClient buildClient(String baseUrl, String token) {
+        return clientCache.computeIfAbsent(baseUrl, url ->
+                RestClient.builder()
+                        .baseUrl(url)
+                        .defaultHeader("X-Api-Key", token)
+                        .requestFactory(new JdkClientHttpRequestFactory(
+                                HttpClient.newBuilder()
+                                        .version(HttpClient.Version.HTTP_1_1)
+                                        .build()
+                        ))
+                        .build()
+        );
+    }
 
     private InterbankProperties.PartnerBank resolvePartnerOrThrow(int routingNumber) {
         return routing.resolvePartnerByRouting(routingNumber)

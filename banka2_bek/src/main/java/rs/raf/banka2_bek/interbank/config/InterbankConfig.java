@@ -32,10 +32,4 @@ public class InterbankConfig {
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
-    @Bean
-    @Primary
-    public RestClient restClient() {
-        return RestClient.builder()
-                .build();
-    }
 }

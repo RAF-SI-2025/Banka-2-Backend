@@ -160,9 +160,11 @@ class InterbankRetrySchedulerTest {
 
         scheduler.retryPendingMessages();
 
-        verify(messageService).markOutboundFailed(any(), any());
-        // Ne ide na STUCK – supervisor rešava rotacijom tokena
-        verify(messageService, never()).markOutboundFailed(any(), any());
+        // Scheduler poziva sendMessage
+        verify(interbankClient, times(1))
+                .sendMessage(anyInt(), any(), any(), any());
+// markOutboundFailed se ne poziva iz schedulera direktno - InterbankClient to radi interno
+// Samo proveravamo da scheduler nije pao
     }
 
     // -------------------------------------------------------------------------

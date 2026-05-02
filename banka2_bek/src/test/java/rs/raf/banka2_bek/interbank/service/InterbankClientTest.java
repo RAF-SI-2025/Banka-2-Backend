@@ -60,13 +60,17 @@ class InterbankClientTest {
         // Pravi RestClient koji će ići na WireMock
         RestClient restClient = RestClient.builder()
                 .baseUrl("http://localhost:" + wireMockServer.port())
+                .requestFactory(new org.springframework.http.client.JdkClientHttpRequestFactory(
+                        java.net.http.HttpClient.newBuilder()
+                                .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                                .build()
+                ))
                 .build();
 
         interbankClient = new InterbankClient(
                 mock(InterbankProperties.class),
                 bankRoutingService,
                 messageService,
-                restClient,
                 new ObjectMapper()
         );
 
@@ -109,7 +113,9 @@ class InterbankClientTest {
     @DisplayName("202 Accepted → vraća null, NE baca exception, ostaje PENDING")
     void sendMessage_202Accepted_returnsNullAndStaysPending() {
         stubFor(post(urlEqualTo("/interbank"))
-                .willReturn(aResponse().withStatus(202)));
+                .willReturn(aResponse()
+                        .withStatus(202)
+                        .withHeader("Content-Type", "application/json")));
 
         Message<String> envelope = buildEnvelope("idem-202");
 
@@ -130,7 +136,9 @@ class InterbankClientTest {
     @DisplayName("204 No Content → vraća null i beleži SENT")
     void sendMessage_204NoContent_returnsNullAndMarksSent() {
         stubFor(post(urlEqualTo("/interbank"))
-                .willReturn(aResponse().withStatus(204)));
+                .willReturn(aResponse()
+                        .withStatus(204)
+                        .withHeader("Content-Type", "application/json")));
 
         Message<String> envelope = buildEnvelope("idem-204");
 
@@ -147,7 +155,9 @@ class InterbankClientTest {
     @DisplayName("401 → baca InterbankAuthException i beleži FAILED")
     void sendMessage_401_throwsAuthException() {
         stubFor(post(urlEqualTo("/interbank"))
-                .willReturn(aResponse().withStatus(401)));
+                .willReturn(aResponse()
+                        .withStatus(401)
+                        .withHeader("Content-Type", "application/json")));
 
         Message<String> envelope = buildEnvelope("idem-401");
 
@@ -165,7 +175,9 @@ class InterbankClientTest {
     @DisplayName("500 → baca InterbankCommunicationException i beleži FAILED")
     void sendMessage_500_throwsCommunicationException() {
         stubFor(post(urlEqualTo("/interbank"))
-                .willReturn(aResponse().withStatus(500)));
+                .willReturn(aResponse()
+                        .withStatus(500)
+                        .withHeader("Content-Type", "application/json")));
 
         Message<String> envelope = buildEnvelope("idem-500");
 
@@ -204,7 +216,10 @@ class InterbankClientTest {
     @DisplayName("recordOutbound se uvek poziva PRE HTTP poziva")
     void sendMessage_recordOutboundCalledBeforeHttpCall() {
         stubFor(post(urlEqualTo("/interbank"))
-                .willReturn(aResponse().withStatus(200).withBody("{\"result\":\"ok\"}")));
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"result\":\"ok\"}")));
 
         Message<String> envelope = buildEnvelope("idem-audit");
 
