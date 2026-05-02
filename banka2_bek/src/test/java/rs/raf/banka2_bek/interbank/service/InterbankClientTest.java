@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -17,6 +18,8 @@ import rs.raf.banka2_bek.interbank.config.InterbankProperties;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
 import rs.raf.banka2_bek.interbank.protocol.*;
 
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -173,56 +176,269 @@ class InterbankClientTest {
     }
 
     // -------------------------------------------------------------------------
-    // OTC stub methods — all throw UnsupportedOperationException
+    // §3.1 fetchPublicStocks
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("fetchPublicStocks throws UnsupportedOperationException (TODO)")
-    void fetchPublicStocks_throws() {
+    @DisplayName("fetchPublicStocks 200 deserializes List<PublicStock>")
+    void fetchPublicStocks_200_returnsList() throws Exception {
+        PublicStock stock = new PublicStock(
+                new StockDescription("AAPL"),
+                List.of(new PublicStock.Seller(new ForeignBankId(REMOTE_RN, "client1"), new BigDecimal("100"))));
+        String json = objectMapper.writeValueAsString(List.of(stock));
+
+        mockServer.expect(requestTo(BASE_URL + "/public-stock"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+        List<PublicStock> result = client.fetchPublicStocks(REMOTE_RN);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).stock().ticker()).isEqualTo("AAPL");
+        assertThat(result.get(0).sellers()).hasSize(1);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchPublicStocks unknown routing throws InterbankProtocolException")
+    void fetchPublicStocks_unknownRouting_throws() {
+        when(bankRoutingService.resolvePartnerByRouting(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> client.fetchPublicStocks(999))
+                .isInstanceOf(InterbankExceptions.InterbankProtocolException.class);
+    }
+
+    @Test
+    @DisplayName("fetchPublicStocks 401 throws InterbankAuthException")
+    void fetchPublicStocks_401_throws() {
+        mockServer.expect(requestTo(BASE_URL + "/public-stock"))
+                .andRespond(withUnauthorizedRequest());
+
         assertThatThrownBy(() -> client.fetchPublicStocks(REMOTE_RN))
-                .isInstanceOf(UnsupportedOperationException.class);
+                .isInstanceOf(InterbankExceptions.InterbankAuthException.class);
+        mockServer.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.2 postNegotiation
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("postNegotiation 200 returns ForeignBankId from body")
+    void postNegotiation_200_returnsForeignBankId() throws Exception {
+        ForeignBankId expected = new ForeignBankId(REMOTE_RN, "neg-uuid-1");
+        String json = objectMapper.writeValueAsString(expected);
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+        ForeignBankId result = client.postNegotiation(REMOTE_RN, buildOffer());
+
+        assertThat(result).isEqualTo(expected);
+        mockServer.verify();
     }
 
     @Test
-    @DisplayName("postNegotiation throws UnsupportedOperationException (TODO)")
-    void postNegotiation_throws() {
-        assertThatThrownBy(() -> client.postNegotiation(REMOTE_RN, null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("postNegotiation unknown routing throws InterbankProtocolException")
+    void postNegotiation_unknownRouting_throws() {
+        when(bankRoutingService.resolvePartnerByRouting(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> client.postNegotiation(999, buildOffer()))
+                .isInstanceOf(InterbankExceptions.InterbankProtocolException.class);
     }
 
     @Test
-    @DisplayName("putCounterOffer throws UnsupportedOperationException (TODO)")
-    void putCounterOffer_throws() {
-        assertThatThrownBy(() -> client.putCounterOffer(null, null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("postNegotiation 500 throws InterbankCommunicationException")
+    void postNegotiation_500_throws() {
+        mockServer.expect(requestTo(BASE_URL + "/negotiations"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.postNegotiation(REMOTE_RN, buildOffer()))
+                .isInstanceOf(InterbankExceptions.InterbankCommunicationException.class);
+        mockServer.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.3 putCounterOffer
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("putCounterOffer 204 succeeds without body")
+    void putCounterOffer_204_succeeds() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-2");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-2"))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withNoContent());
+
+        client.putCounterOffer(negId, buildOffer());
+        mockServer.verify();
     }
 
     @Test
-    @DisplayName("getNegotiation throws UnsupportedOperationException (TODO)")
-    void getNegotiation_throws() {
-        assertThatThrownBy(() -> client.getNegotiation(null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("putCounterOffer 401 throws InterbankAuthException")
+    void putCounterOffer_401_throws() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-3");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-3"))
+                .andRespond(withUnauthorizedRequest());
+
+        assertThatThrownBy(() -> client.putCounterOffer(negId, buildOffer()))
+                .isInstanceOf(InterbankExceptions.InterbankAuthException.class);
+        mockServer.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.4 getNegotiation
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("getNegotiation 200 deserializes OtcNegotiation body")
+    void getNegotiation_200_returnsBody() throws Exception {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-4");
+        OtcNegotiation negotiation = new OtcNegotiation(
+                new StockDescription("MSFT"),
+                OffsetDateTime.parse("2026-12-31T00:00:00Z"),
+                new MonetaryValue(CurrencyCode.USD, new BigDecimal("250.00")),
+                new MonetaryValue(CurrencyCode.USD, new BigDecimal("5.00")),
+                new ForeignBankId(222, "buyer1"),
+                new ForeignBankId(REMOTE_RN, "seller1"),
+                new BigDecimal("10"),
+                new ForeignBankId(222, "buyer1"),
+                true);
+        String json = objectMapper.writeValueAsString(negotiation);
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-4"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+        OtcNegotiation result = client.getNegotiation(negId);
+
+        assertThat(result).isNotNull();
+        assertThat(result.stock().ticker()).isEqualTo("MSFT");
+        assertThat(result.isOngoing()).isTrue();
+        mockServer.verify();
     }
 
     @Test
-    @DisplayName("deleteNegotiation throws UnsupportedOperationException (TODO)")
-    void deleteNegotiation_throws() {
-        assertThatThrownBy(() -> client.deleteNegotiation(null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("getNegotiation unknown routing throws InterbankProtocolException")
+    void getNegotiation_unknownRouting_throws() {
+        when(bankRoutingService.resolvePartnerByRouting(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> client.getNegotiation(new ForeignBankId(999, "x")))
+                .isInstanceOf(InterbankExceptions.InterbankProtocolException.class);
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.5 deleteNegotiation
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("deleteNegotiation 204 succeeds")
+    void deleteNegotiation_204_succeeds() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-5");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-5"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withNoContent());
+
+        client.deleteNegotiation(negId);
+        mockServer.verify();
     }
 
     @Test
-    @DisplayName("acceptNegotiation throws UnsupportedOperationException (TODO)")
-    void acceptNegotiation_throws() {
-        assertThatThrownBy(() -> client.acceptNegotiation(null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("deleteNegotiation 500 throws InterbankCommunicationException")
+    void deleteNegotiation_500_throws() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-6");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-6"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.deleteNegotiation(negId))
+                .isInstanceOf(InterbankExceptions.InterbankCommunicationException.class);
+        mockServer.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.6 acceptNegotiation (synchronous — waits for COMMITTED)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("acceptNegotiation 200 succeeds (partner reports COMMITTED)")
+    void acceptNegotiation_200_succeeds() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-7");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-7/accept"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withSuccess());
+
+        client.acceptNegotiation(negId);
+        mockServer.verify();
     }
 
     @Test
-    @DisplayName("getUserInfo throws UnsupportedOperationException (TODO)")
-    void getUserInfo_throws() {
-        assertThatThrownBy(() -> client.getUserInfo(null))
-                .isInstanceOf(UnsupportedOperationException.class);
+    @DisplayName("acceptNegotiation 500 throws InterbankCommunicationException")
+    void acceptNegotiation_500_throws() {
+        ForeignBankId negId = new ForeignBankId(REMOTE_RN, "neg-uuid-8");
+
+        mockServer.expect(requestTo(BASE_URL + "/negotiations/" + REMOTE_RN + "/neg-uuid-8/accept"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+        assertThatThrownBy(() -> client.acceptNegotiation(negId))
+                .isInstanceOf(InterbankExceptions.InterbankCommunicationException.class);
+        mockServer.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // §3.7 getUserInfo
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("getUserInfo 200 deserializes UserInformation body")
+    void getUserInfo_200_returnsBody() throws Exception {
+        ForeignBankId userId = new ForeignBankId(REMOTE_RN, "user-1");
+        UserInformation info = new UserInformation("Banka 1 d.o.o.", "Marko Markovic");
+        String json = objectMapper.writeValueAsString(info);
+
+        mockServer.expect(requestTo(BASE_URL + "/user/" + REMOTE_RN + "/user-1"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Api-Key", OUT_TOKEN))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+        UserInformation result = client.getUserInfo(userId);
+
+        assertThat(result).isNotNull();
+        assertThat(result.bankDisplayName()).isEqualTo("Banka 1 d.o.o.");
+        assertThat(result.displayName()).isEqualTo("Marko Markovic");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("getUserInfo unknown routing throws InterbankProtocolException")
+    void getUserInfo_unknownRouting_throws() {
+        when(bankRoutingService.resolvePartnerByRouting(999)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> client.getUserInfo(new ForeignBankId(999, "u")))
+                .isInstanceOf(InterbankExceptions.InterbankProtocolException.class);
+    }
+
+    private OtcOffer buildOffer() {
+        return new OtcOffer(
+                new StockDescription("AAPL"),
+                OffsetDateTime.parse("2026-12-31T00:00:00Z"),
+                new MonetaryValue(CurrencyCode.USD, new BigDecimal("180.00")),
+                new MonetaryValue(CurrencyCode.USD, new BigDecimal("3.50")),
+                new ForeignBankId(222, "buyer1"),
+                new ForeignBankId(REMOTE_RN, "seller1"),
+                new BigDecimal("5"),
+                new ForeignBankId(222, "buyer1"));
     }
 
     // -------------------------------------------------------------------------
