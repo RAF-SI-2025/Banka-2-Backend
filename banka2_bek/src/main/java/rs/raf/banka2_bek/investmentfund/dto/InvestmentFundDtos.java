@@ -140,4 +140,7 @@ public final class InvestmentFundDtos {
         private LocalDateTime completedAt;
         private String failureReason;
     }
+    public enum Granularity {
+        DAY, WEEK, MONTH, QUARTER, YEAR
+    }
 }

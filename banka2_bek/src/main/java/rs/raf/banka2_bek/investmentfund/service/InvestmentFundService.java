@@ -5,10 +5,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.investmentfund.dto.InvestmentFundDtos.*;
+import rs.raf.banka2_bek.investmentfund.model.FundValueSnapshot;
+import rs.raf.banka2_bek.investmentfund.repository.FundValueSnapshotRepository;
 import rs.raf.banka2_bek.investmentfund.repository.InvestmentFundRepository;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /*
 ================================================================================
@@ -74,6 +79,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class InvestmentFundService {
 
+    private final FundValueSnapshotRepository fundValueSnapshotRepository;
+
     private final InvestmentFundRepository investmentFundRepository;
     // TODO: injectovati ostale potrebne repoze + FundValueCalculator + CurrencyConversionService:
     //   ClientFundPositionRepository, ClientFundTransactionRepository, FundValueSnapshotRepository,
@@ -110,9 +117,60 @@ public class InvestmentFundService {
      * FE FundDetailsPage ima toggle Day/Week/Month/Quarter/Year — ovde
      * dodati granularity parametar kad bude.
      */
-    public List<FundPerformancePointDto> getPerformance(Long fundId, LocalDate from, LocalDate to) {
-        throw new UnsupportedOperationException(
-                "TODO P11: implementirati performance agregaciju (DAY/WEEK/MONTH/QUARTER/YEAR)");
+    public List<FundPerformancePointDto> getPerformance(Long fundId, LocalDate from, LocalDate to, Granularity granularity) {
+        List<FundValueSnapshot> snapshots = fundValueSnapshotRepository.findByFundIdAndSnapshotDateBetweenOrderBySnapshotDateAsc(fundId, from, to);
+        if (snapshots.isEmpty()) return List.of();
+        List<FundPerformancePointDto> result = new ArrayList<>();
+        switch (granularity) {
+            case DAY -> {
+                for (FundValueSnapshot snap : snapshots) {
+                    result.add(new FundPerformancePointDto(snap.getSnapshotDate(), snap.getFundValue(), snap.getProfit()));
+                }
+            }
+            case WEEK -> {
+                Map<String, FundValueSnapshot> lastOfWeek = new LinkedHashMap<>();
+                for (FundValueSnapshot snap : snapshots) {
+                    String key = snap.getSnapshotDate().getYear() + "-W" + snap.getSnapshotDate().get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+                    lastOfWeek.put(key, snap);
+                }
+                for (FundValueSnapshot snap : lastOfWeek.values()) {
+                    result.add(new FundPerformancePointDto(snap.getSnapshotDate(), snap.getFundValue(), snap.getProfit()));
+                }
+            }
+            case MONTH -> {
+                Map<String, FundValueSnapshot> lastOfMonth = new LinkedHashMap<>();
+                for (FundValueSnapshot snap : snapshots) {
+                    String key = snap.getSnapshotDate().getYear() + "-" + snap.getSnapshotDate().getMonthValue();
+                    lastOfMonth.put(key, snap);
+                }
+                for (FundValueSnapshot snap : lastOfMonth.values()) {
+                    result.add(new FundPerformancePointDto(snap.getSnapshotDate(), snap.getFundValue(), snap.getProfit()));
+                }
+            }
+            case QUARTER -> {
+                Map<String, FundValueSnapshot> lastOfQuarter = new LinkedHashMap<>();
+                for (FundValueSnapshot snap : snapshots) {
+                    int quarter = (snap.getSnapshotDate().getMonthValue() - 1) / 3 + 1;
+                    String key = snap.getSnapshotDate().getYear() + "-Q" + quarter;
+                    lastOfQuarter.put(key, snap);
+                }
+                for (FundValueSnapshot snap : lastOfQuarter.values()) {
+                    result.add(new FundPerformancePointDto(snap.getSnapshotDate(), snap.getFundValue(), snap.getProfit()));
+                }
+            }
+            case YEAR -> {
+                Map<Integer, FundValueSnapshot> lastOfYear = new LinkedHashMap<>();
+                for (FundValueSnapshot snap : snapshots) {
+                    int year = snap.getSnapshotDate().getYear();
+                    lastOfYear.put(year, snap);
+                }
+                for (FundValueSnapshot snap : lastOfYear.values()) {
+                    result.add(new FundPerformancePointDto(snap.getSnapshotDate(), snap.getFundValue(), snap.getProfit()));
+                }
+            }
+        }
+        result.sort(java.util.Comparator.comparing(FundPerformancePointDto::getDate));
+        return result;
     }
 
     /**
