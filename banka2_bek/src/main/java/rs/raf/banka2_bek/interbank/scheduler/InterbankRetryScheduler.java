@@ -2,6 +2,10 @@ package rs.raf.banka2_bek.interbank.scheduler;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions.InterbankAuthException;
@@ -40,10 +44,6 @@ import java.util.List;
       - 4xx/5xx/network -> markOutboundFailed (retryCount++)
       - 401     -> auth issue, skip retry, log ERROR
 
- IDEMPOTENCY (§2.2):
-  Idempotence key se ZADRZAVA pri retry-u. Druga banka pri ponovnom
-  prijemu vraca isti odgovor (cache hit u InterbankMessageService).
-
  KONFIGURACIJA:
    interbank.retry.interval-seconds=30
    interbank.retry.max-retries=10
@@ -59,6 +59,7 @@ import java.util.List;
 */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class InterbankRetryScheduler {
 
     private final InterbankMessageRepository messageRepository;
@@ -73,6 +74,7 @@ public class InterbankRetryScheduler {
 
     @Value("${interbank.retry.stuck-timeout-minutes:30}")
     private int stuckTimeoutMinutes;
+    private final ObjectMapper objectMapper;
 
     public InterbankRetryScheduler(InterbankMessageRepository messageRepository,
                                    InterbankMessageService messageService,
@@ -83,97 +85,12 @@ public class InterbankRetryScheduler {
     }
 
     @Scheduled(fixedRate = 120_000)
-    public void retryPendingMessages() {
-        LocalDateTime cutoff = LocalDateTime.now().minusSeconds(retryIntervalSeconds);
-
-        List<InterbankMessage> pending = messageRepository.findPendingForRetry(
-                InterbankMessageStatus.PENDING, cutoff);
-
-        if (pending.isEmpty()) {
-            log.debug("[RetryScheduler] Nema PENDING poruka za retry.");
-            return;
-        }
-
-        log.info("[RetryScheduler] Pokrenuta retry rutina – {} PENDING poruka.", pending.size());
-
-        for (InterbankMessage message : pending) {
-            try {
-                retrySingleMessage(message);
-            } catch (Exception e) {
-                log.error("[RetryScheduler] Neočekivana greška pri retry messageId={}: {}",
-                        message.getId(), e.getMessage(), e);
-            }
-        }
-
-        log.info("[RetryScheduler] Retry rutina završena.");
-    }
-
-    // =========================================================================
-    // Interni helperi
-    // =========================================================================
-
-    private void retrySingleMessage(InterbankMessage message) {
-        IdempotenceKey key = new IdempotenceKey(
-                message.getSenderRoutingNumber(),
-                message.getLocallyGeneratedKey()
-        );
-
-        // Stuck po timeout-u – bez obzira na retryCount
-        if (isStuckByTimeout(message)) {
-            markStuck(key, message, "Stuck timeout od " + stuckTimeoutMinutes + " minuta prekoračen");
-            return;
-        }
-
-        // Stuck po broju pokušaja
-        if (message.getRetryCount() >= maxRetries) {
-            markStuck(key, message, "Dostignut maxRetries=" + maxRetries);
-            return;
-        }
-
-        int targetRouting = message.getPeerRoutingNumber();
-        MessageType type = message.getMessageType();
-
-        log.info("[RetryScheduler] Retry messageId={} type={} routing={} pokušaj #{}",
-                message.getId(), type, targetRouting, message.getRetryCount() + 1);
-
-        // Rekonstruišemo envelope sa ISTIM idempotency ključem (§2.2)
-        // Partner cache-ira odgovor po ovom ključu i vraća ga bez ponovnog pokretanja logike
-        Message<String> envelope = new Message<>(key, type, message.getRequestBody());
-
-        try {
-            interbankClient.sendMessage(targetRouting, type, envelope, resolveResponseType(type));
-            log.info("[RetryScheduler] Retry uspešan za messageId={}", message.getId());
-
-        } catch (InterbankAuthException e) {
-            // 401 – InterbankClient je već pozvao markOutboundFailed
-            log.error("[RetryScheduler] AUTH GREŠKA messageId={} routing={} – " +
-                    "skip retry, potrebna rotacija tokena!", message.getId(), targetRouting);
-
-        } catch (InterbankCommunicationException e) {
-            // 4xx/5xx/network – InterbankClient je već pozvao markOutboundFailed (retryCount++)
-            log.warn("[RetryScheduler] Komunikacijska greška messageId={}: {}",
-                    message.getId(), e.getMessage());
-        }
-    }
-
-    private boolean isStuckByTimeout(InterbankMessage message) {
-        if (message.getCreatedAt() == null) return false;
-        return LocalDateTime.now().isAfter(message.getCreatedAt().plusMinutes(stuckTimeoutMinutes));
-    }
-
-    private void markStuck(IdempotenceKey key, InterbankMessage message, String razlog) {
-        messageService.markOutboundFailed(key, razlog);
-        log.error("[RetryScheduler] STUCK messageId={} type={} routing={} razlog='{}'. " +
-                        "Lokalna transakcija ostaje PREPARED – supervisor mora intervencijom!",
-                message.getId(), message.getMessageType(),
-                message.getPeerRoutingNumber(), razlog);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <Resp> Class<Resp> resolveResponseType(MessageType type) {
-        return switch (type) {
-            case NEW_TX -> (Class<Resp>) TransactionVote.class;
-            case COMMIT_TX, ROLLBACK_TX -> (Class<Resp>) Void.class;
-        };
+    public void retryStaleMessages() {
+        // TODO:
+        //  1. messageRepo.findPendingForRetry(now - intervalSeconds)
+        //  2. za svaku:
+        //     - if retryCount >= maxRetries: markOutboundFailed → STUCK
+        //     - else: client.sendMessage(...) + recordovati ishod
+        //  3. Atomicno per-poruka (osim send-a) — ne blokiraj druge poruke
     }
 }

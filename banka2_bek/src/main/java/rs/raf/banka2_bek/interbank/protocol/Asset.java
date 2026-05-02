@@ -1,5 +1,8 @@
 package rs.raf.banka2_bek.interbank.protocol;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 /**
  * Spec ref: protokol §2.7 Assets
  *
@@ -7,9 +10,15 @@ package rs.raf.banka2_bek.interbank.protocol;
  * OptionAsset (opcioni ugovori). Pri serijalizaciji u JSON se pojavljuje
  * polje `type` ('MONAS' | 'STOCK' | 'OPTION') + odgovarajuci `asset` payload.
  *
- * TODO: konfigurisati Jackson custom (de)serializer ili @JsonTypeInfo da
- * deserijalizuje JSON {type:'MONAS',asset:{...}} u pravu variantu.
  */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes(
+        {
+        @JsonSubTypes.Type(value = Asset.Monas.class, name = "MONAS"),
+        @JsonSubTypes.Type(value = Asset.Stock.class, name = "STOCK"),
+        @JsonSubTypes.Type(value = Asset.OptionAsset.class, name = "OPTION")
+    }
+)
 public sealed interface Asset permits Asset.Monas, Asset.Stock, Asset.OptionAsset {
 
     record Monas(MonetaryAsset asset) implements Asset {}

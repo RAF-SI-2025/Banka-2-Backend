@@ -2444,3 +2444,113 @@ VALUES
     (1006, 3, 'CLIENT', 4, 'CLIENT', 13, 1, 825.0000, 30.0000,
      (CURRENT_DATE - INTERVAL '5 days'), 'EXPIRED',
      (NOW() - INTERVAL '35 days'), NULL);
+
+-- ============================================================
+-- T12 — BANKA KAO KLIJENT FONDA + INVESTMENT FUND OWNER SEED
+-- ============================================================
+-- Spec ref:
+--   Celina 4 (Nova) §4406-4435 (Napomena 1+2 — banka investira preko
+--                                "vlasnik banke" klijenta)
+--   Celina 5 (Nova) — OTC inter-bank entiteti su odvojen sloj (vidi
+--                     interbank_otc_negotiations / interbank_otc_contracts)
+--
+-- Cilj:
+--   Da Profit Banke portala "Pozicije u fondovima" tab prikazuje prave
+--   podatke (ne prazan list). Banka se tretira kao obican klijent
+--   (userRole='CLIENT') sa svojim client_id-jem; svaka pozicija banke u
+--   fondu se evidentira u client_fund_positions sa userId = bankov client_id.
+--
+-- Idempotentnost:
+--   Svi INSERT-i koriste WHERE NOT EXISTS pa se mogu ponavljati pri
+--   re-seedu (Docker rebuild --no-cache + spring boot start).
+--
+-- IMPORTANT: ovaj blok mora ici NAKON sto Hibernate kreira:
+--   - clients          (vec postoji u prethodnom seedu)
+--   - investment_funds, client_fund_positions (Hibernate ddl-auto=update)
+-- ============================================================
+
+-- 1) Banka kao klijent (vlasnik banke) — Celina 4 (Nova) Napomena 1
+INSERT INTO clients (first_name, last_name, date_of_birth, gender, email, phone, address,
+                     password, salt_password, active, created_at)
+SELECT 'Banka 2', 'd.o.o.', '2025-01-01', 'OTHER', 'banka2.doo@banka.rs',
+       '+381 11 000 0000', 'Bulevar Kralja Aleksandra 73, Beograd',
+       '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+       'c2VlZF9iYW5rYV9kb29f', 1, NOW()
+WHERE NOT EXISTS (
+    SELECT 1 FROM clients WHERE email = 'banka2.doo@banka.rs'
+);
+
+-- 2) Sample investment_funds — minimalan demo set tako da listBankPositions
+--    ima sta da vrati. Polja su:
+--      name, description, minimum_contribution, manager_employee_id,
+--      account_id, created_at, active, owner_client_id, inception_date
+--
+--    manager_employee_id  -> 1 (Marko Petrovic, admin/supervisor)
+--    account_id           -> 222000100000000110 (RSD bankin BANK_TRADING racun)
+--    owner_client_id      -> nas novi "Banka 2 d.o.o." klijent
+--
+--    Ako T7 (createFund) bude seed-ovao svoje fondove, ovi minimalni demo
+--    fondovi nece praviti konflikt jer imaju jedinstvena imena.
+INSERT INTO investment_funds (name, description, minimum_contribution, manager_employee_id,
+                               account_id, created_at, active, owner_client_id, inception_date)
+SELECT 'Banka 2 Stable Income', 'Konzervativni fond fokusiran na obveznice i blue-chip akcije.',
+       1000.0000, 1,
+       (SELECT id FROM accounts WHERE account_number = '222000100000000110'),
+       NOW(), 1,
+       (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs'),
+       (CURRENT_DATE - INTERVAL '180 days')
+WHERE EXISTS (SELECT 1 FROM accounts WHERE account_number = '222000100000000110')
+  AND NOT EXISTS (SELECT 1 FROM investment_funds WHERE name = 'Banka 2 Stable Income');
+
+INSERT INTO investment_funds (name, description, minimum_contribution, manager_employee_id,
+                               account_id, created_at, active, owner_client_id, inception_date)
+SELECT 'Banka 2 Tech Growth', 'Agresivan fond fokusiran na IT i tech sektor.',
+       5000.0000, 1,
+       (SELECT id FROM accounts WHERE account_number = '222000100000000110'),
+       NOW(), 1,
+       (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs'),
+       (CURRENT_DATE - INTERVAL '90 days')
+WHERE EXISTS (SELECT 1 FROM accounts WHERE account_number = '222000100000000110')
+  AND NOT EXISTS (SELECT 1 FROM investment_funds WHERE name = 'Banka 2 Tech Growth');
+
+-- 3) Backfill owner_client_id za SVE postojece fondove (po §4406-4435):
+--    Ako fond nema postavljen vlasnika (npr. T7 jos nije pozvao
+--    createFund sa owner_client_id parametrom), default-ujemo na "Banka 2
+--    d.o.o." klijenta. Ovo cini listBankPositions deterministicki rad
+--    cak i za fondove kreirane pre uvoda owner_client_id polja.
+UPDATE investment_funds
+SET owner_client_id = (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs')
+WHERE owner_client_id IS NULL;
+
+-- 4) Sample bankine pozicije u fondovima — Celina 4 (Nova) Napomena 2:
+--    "ClientFundPosition za banku: Klijent je klijent koji je vlasnik banke."
+--    userRole = 'CLIENT', userId = banka2.doo client_id
+INSERT INTO client_fund_positions (fund_id, user_id, user_role, total_invested, last_modified_at)
+SELECT f.id,
+       (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs'),
+       'CLIENT',
+       250000.0000,
+       NOW()
+FROM investment_funds f
+WHERE f.name = 'Banka 2 Stable Income'
+  AND NOT EXISTS (
+      SELECT 1 FROM client_fund_positions p
+      WHERE p.fund_id = f.id
+        AND p.user_id = (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs')
+        AND p.user_role = 'CLIENT'
+  );
+
+INSERT INTO client_fund_positions (fund_id, user_id, user_role, total_invested, last_modified_at)
+SELECT f.id,
+       (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs'),
+       'CLIENT',
+       500000.0000,
+       NOW()
+FROM investment_funds f
+WHERE f.name = 'Banka 2 Tech Growth'
+  AND NOT EXISTS (
+      SELECT 1 FROM client_fund_positions p
+      WHERE p.fund_id = f.id
+        AND p.user_id = (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs')
+        AND p.user_role = 'CLIENT'
+  );

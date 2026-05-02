@@ -26,33 +26,56 @@ package rs.raf.banka2_bek.interbank.exception;
 */
 public final class InterbankExceptions {
 
-    private InterbankExceptions() {}
+    private InterbankExceptions() {
+    }
 
     public static class InterbankException extends RuntimeException {
-        public InterbankException(String message) { super(message); }
-        public InterbankException(String message, Throwable cause) { super(message, cause); }
+        public InterbankException(String message) {
+            super(message);
+        }
+
+        public InterbankException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     public static class InterbankCommunicationException extends InterbankException {
-        public InterbankCommunicationException(String message) { super(message); }
-        public InterbankCommunicationException(String message, Throwable cause) { super(message, cause); }
+        public InterbankCommunicationException(String message) {
+            super(message);
+        }
+
+        public InterbankCommunicationException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
-    /** §2.10 — los ili nedostaje X-Api-Key. */
+    /**
+     * §2.10 — los ili nedostaje X-Api-Key.
+     */
     public static class InterbankAuthException extends InterbankException {
-        public InterbankAuthException(String message) { super(message); }
+        public InterbankAuthException(String message) {
+            super(message);
+        }
     }
 
     public static class InterbankProtocolException extends InterbankException {
-        public InterbankProtocolException(String message) { super(message); }
+        public InterbankProtocolException(String message) {
+            super(message);
+        }
     }
 
-    /** §2.2 — duplikat pri belezenju idempotence kljuca ili stale cached response. */
+    /**
+     * §2.2 — duplikat pri belezenju idempotence kljuca ili stale cached response.
+     */
     public static class InterbankIdempotencyException extends InterbankException {
-        public InterbankIdempotencyException(String message) { super(message); }
+        public InterbankIdempotencyException(String message) {
+            super(message);
+        }
     }
 
     public static class InterbankTransactionStuckException extends InterbankException {
-        public InterbankTransactionStuckException(String message) { super(message); }
+        public InterbankTransactionStuckException(String message) {
+            super(message);
+        }
     }
 }

@@ -10,5 +10,6 @@ package rs.raf.banka2_bek.account.model;
 public enum AccountCategory {
     CLIENT,
     BANK_TRADING,
-    MARGIN
+    MARGIN,
+    FUND
 }
