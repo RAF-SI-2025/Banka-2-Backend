@@ -11,9 +11,13 @@ import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.model.AccountStatus;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContract;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcNegotiation;
 import rs.raf.banka2_bek.interbank.model.InterbankTransaction;
 import rs.raf.banka2_bek.interbank.model.InterbankTransactionStatus;
 import rs.raf.banka2_bek.interbank.protocol.*;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcContractRepository;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcNegotiationRepository;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
@@ -38,6 +42,8 @@ public class TransactionExecutorService {
     private final PortfolioRepository portfolioRepository;
     private final InterbankReservationApplier reservationApplier;
     private final ListingRepository listingRepository;
+    private final InterbankOtcNegotiationRepository otcNegotiationRepository;
+    private final InterbankOtcContractRepository otcContractRepository;
 
     /**
      * §2.8.5: self-proxy so that @Transactional on phase methods is respected when called
@@ -586,8 +592,21 @@ public class TransactionExecutorService {
                     }
                 }
 
-            } else if (asset instanceof Asset.OptionAsset) {
-                violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+            } else if (asset instanceof Asset.OptionAsset opAsset && account instanceof TxAccount.Option op) {
+                OptionDescription optionDescription = opAsset.asset();
+                ForeignBankId negotiationId = optionDescription.negotiationId();
+
+                Optional<InterbankOtcNegotiation> negotiationOptional = otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(negotiationId.routingNumber(), negotiationId.id());
+
+                if (negotiationOptional.isEmpty()) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+                }
+
+
+
+                //b2b protocol 2.8.6 - pravilo 5
+
+                //b2b protocol 2.8.6 - pravilo 6
 
             } else {
                 violations.add(new NoVoteReason(NoVoteReason.Reason.UNACCEPTABLE_ASSET, p));

@@ -66,9 +66,6 @@ public class InterbankInboundController {
     private final InterbankMessageService interbankMessageService;
     private final TransactionExecutorService transactionExecutorService;
 
-    // TODO: injectovati TransactionExecutorService, InterbankMessageService,
-    //   BankRoutingService, ObjectMapper
-
     /**
      * Glavni endpoint po §2.11. Body je Message<Type> envelope sa
      * idempotenceKey + messageType + message (Transaction / CommitTransaction
@@ -111,21 +108,6 @@ public class InterbankInboundController {
             return ResponseEntity.ok(objectMapper.readTree(cashedOpt.get()));
 
         return ResponseEntity.noContent().build();
-
-
-        // TODO:
-        //  1. §2.10 — provera X-Api-Key + envelope.idempotenceKey.routingNumber
-        //  2. §2.2 — InterbankMessageService.findCachedResponse → return cache hit
-        //  3. §2.12 dispatch po envelope.messageType:
-        //     case NEW_TX:      cast envelope.message → Transaction →
-        //                       TransactionExecutorService.handleNewTx
-        //                       → TransactionVote → 200
-        //     case COMMIT_TX:   cast → CommitTransaction →
-        //                       TransactionExecutorService.handleCommitTx → 204
-        //     case ROLLBACK_TX: cast → RollbackTransaction →
-        //                       TransactionExecutorService.handleRollbackTx → 204
-        //  4. Atomicno sa biznis logikom: InterbankMessageService.recordInboundResponse
-        //  5. Network/IO greske -> 500; biznis -> 200 sa NO glasom (ne 5xx)
 
     }
 
