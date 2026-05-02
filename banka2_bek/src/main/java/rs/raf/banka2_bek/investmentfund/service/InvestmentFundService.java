@@ -2,11 +2,16 @@ package rs.raf.banka2_bek.investmentfund.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.investmentfund.dto.InvestmentFundDtos.*;
 import rs.raf.banka2_bek.investmentfund.model.FundValueSnapshot;
 import rs.raf.banka2_bek.investmentfund.repository.FundValueSnapshotRepository;
+import rs.raf.banka2_bek.investmentfund.model.ClientFundPosition;
+import rs.raf.banka2_bek.investmentfund.model.InvestmentFund;
+import rs.raf.banka2_bek.investmentfund.repository.ClientFundPositionRepository;
 import rs.raf.banka2_bek.investmentfund.repository.InvestmentFundRepository;
 
 import java.time.LocalDate;
@@ -14,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /*
 ================================================================================
@@ -82,10 +88,23 @@ public class InvestmentFundService {
     private final FundValueSnapshotRepository fundValueSnapshotRepository;
 
     private final InvestmentFundRepository investmentFundRepository;
-    // TODO: injectovati ostale potrebne repoze + FundValueCalculator + CurrencyConversionService:
-    //   ClientFundPositionRepository, ClientFundTransactionRepository, FundValueSnapshotRepository,
-    //   AccountRepository, PortfolioRepository, ListingRepository, FundValueCalculator,
-    //   CurrencyConversionService, FundLiquidationService
+    // T12 (P9 + listMyPositions): repoze za pozicije + lookup klijenta-vlasnika banke.
+    // Ostale zavisnosti (FundValueCalculator, CurrencyConversionService,
+    // ClientFundTransactionRepository, FundLiquidationService, ...) ce dodati T7-T9.
+    private final ClientFundPositionRepository clientFundPositionRepository;
+    private final ClientRepository clientRepository;
+
+    /**
+     * T12 — fallback strategija za "Banka kao klijent fonda" (Celina 4 (Nova) §4406-4435).
+     *
+     * Email pod kojim seed.sql kreira "Banka 2 d.o.o." klijenta. Po default-u
+     * "banka2.doo@banka.rs" (vidi application.properties + seed.sql).
+     * InvestmentFundService.listBankPositions koristi ga da resolvuje
+     * `clients.id` u runtime (jer client_id je auto-generisan i ne mozemo ga
+     * forsirati na konstantu).
+     */
+    @Value("${bank.owner-client-email:banka2.doo@banka.rs}")
+    private String bankOwnerClientEmail;
 
     @Transactional
     public InvestmentFundDetailDto createFund(CreateFundDto dto, Long supervisorId) {
@@ -221,28 +240,99 @@ public class InvestmentFundService {
                 + "tx ostaje PENDING dok FundLiquidationService ne proda hartije.");
     }
 
+    /**
+     * T12 — Spec Celina 4 (Nova) "Moj portfolio -> Moji fondovi page".
+     *
+     * Vraca sve pozicije (ClientFundPosition) za autentifikovanog korisnika.
+     * Pozicija se identifikuje (userId, userRole) parom — supervizor moze
+     * imati pozicije i kao CLIENT (privatne) i preko bankine `ownerClientId`
+     * (kroz listBankPositions, ne ovde).
+     *
+     * Izvedena polja (currentValue, percentOfFund, profit) ostaju null:
+     *  - zavise od FundValueCalculator-a koji T7+T10 jos pisu (FundValueSnapshot
+     *    + ListingRepository + CurrencyConversionService)
+     *  - kad budu dostupni, dopuni `toClientFundPositionDto` mapper
+     *    (umesto null, popuni iz cached snapshot-a ili racunaj live)
+     *
+     * Koristi se iz InvestmentFundController.GET /funds/my-positions.
+     */
     public List<ClientFundPositionDto> listMyPositions(Long userId, String userRole) {
-        throw new UnsupportedOperationException("TODO");
+        if (userId == null || userRole == null || userRole.isBlank()) {
+            return List.of();
+        }
+        List<ClientFundPosition> positions =
+                clientFundPositionRepository.findByUserIdAndUserRole(userId, userRole);
+        if (positions.isEmpty()) {
+            return List.of();
+        }
+        // Batch-load fondova da izbegnemo N+1 lookup za fundName u DTO-u.
+        List<Long> fundIds = positions.stream().map(ClientFundPosition::getFundId).distinct().toList();
+        Map<Long, String> fundIdToName = investmentFundRepository.findAllById(fundIds).stream()
+                .collect(Collectors.toMap(InvestmentFund::getId, InvestmentFund::getName));
+        return positions.stream()
+                .map(p -> toClientFundPositionDto(p, fundIdToName.get(p.getFundId())))
+                .toList();
     }
 
     /**
-     * P9 — Spec Celina 4 (Nova) §4222 Napomena 2: Banka kao klijent fonda.
-     * Ovo vraca sve ClientFundPosition entitete gde je userRole='CLIENT' i
-     * userId == InvestmentFund.ownerClientId banke.
+     * T12 — Spec Celina 4 (Nova) §4406-4435 (Napomena 1+2): Banka kao klijent fonda.
      *
-     * Implementacija (kad bude):
-     *  Long ownerClientId = bankProperties.getOwnerClientId();
-     *  return positionRepository
-     *      .findByUserIdAndUserRole(ownerClientId, "CLIENT")
-     *      .stream().map(this::toClientFundPositionDto).toList();
+     * Vraca sve pozicije gde je vlasnik klijent koji predstavlja banku
+     * (userRole='CLIENT', userId == bank.owner-client-id). Koristi se
+     * iz Profit Banke portala "Pozicije u fondovima" tab.
      *
-     * Trenutno baca UnsupportedOperationException; ProfitBankController
-     * lovi tu i vraca prazan list (graceful fallback) tako da FE moze
-     * renderovati "Banka nema pozicije" placeholder.
+     * Resolvovanje banka client_id-ja:
+     *  1) lookup u clients tabeli po email-u iz `bank.owner-client-email`
+     *     property-ja (default "banka2.doo@banka.rs")
+     *  2) ako klijent ne postoji — vrati prazan list (Profit Banke FE
+     *     renderuje "Banka nema pozicije" placeholder)
+     *
+     * Razlog za email-based resolvovanje umesto fixed ID-ja: clients.id
+     * je AUTO_INCREMENT pa ne mozemo seed-ovati eksplicitan ID bez
+     * konflikta. Email je jedinstven (uk_clients_email constraint) i
+     * stabilan kroz re-seed.
      */
     public List<ClientFundPositionDto> listBankPositions() {
-        throw new UnsupportedOperationException(
-                "TODO P9: implementirati listBankPositions — vidi javadoc iznad");
+        Long bankClientId = clientRepository.findByEmail(bankOwnerClientEmail)
+                .map(c -> c.getId())
+                .orElse(null);
+        if (bankClientId == null) {
+            // Banka klijent nije seed-ovan — graceful fallback (Profit Banke
+            // FE prikazuje "Banka nema pozicije" placeholder umesto greske).
+            log.warn("Bank owner client (email={}) not found — returning empty bank positions list. "
+                    + "Add seed entry or set bank.owner-client-email to a valid client.",
+                    bankOwnerClientEmail);
+            return List.of();
+        }
+        // userRole je uvek "CLIENT" za bankine pozicije (Napomena 2: "Klijent
+        // je klijent koji je vlasnik banke" — banka se ponasa kao obican CLIENT).
+        return listMyPositions(bankClientId, "CLIENT");
+    }
+
+    /**
+     * T12 — privatni mapper iz domena (ClientFundPosition) u FE DTO.
+     * Polja `currentValue`, `percentOfFund`, `profit` ostaju null jer
+     * zavise od FundValueCalculator-a koji T7+T10 jos pisu. Kad budu
+     * dostupni, prosiri ovde (npr. inject FundValueCalculator i racunaj
+     * iz live snapshot-a ili poslednjeg FundValueSnapshot reda).
+     */
+    private ClientFundPositionDto toClientFundPositionDto(ClientFundPosition position, String fundName) {
+        ClientFundPositionDto dto = new ClientFundPositionDto();
+        dto.setId(position.getId());
+        dto.setFundId(position.getFundId());
+        dto.setFundName(fundName);
+        dto.setUserId(position.getUserId());
+        dto.setUserRole(position.getUserRole());
+        // userName: T7+T8 ce dopuniti rezolvujuci po (userId, userRole) iz
+        // clients ili employees tabele. Trenutno ostaje null.
+        dto.setUserName(null);
+        dto.setTotalInvested(position.getTotalInvested());
+        // Izvedena polja — null dok FundValueCalculator (T7+T10) ne bude gotov.
+        dto.setCurrentValue(null);
+        dto.setPercentOfFund(null);
+        dto.setProfit(null);
+        dto.setLastModifiedAt(position.getLastModifiedAt());
+        return dto;
     }
 
     /**

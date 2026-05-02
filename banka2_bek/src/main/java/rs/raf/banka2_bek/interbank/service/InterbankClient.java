@@ -1,7 +1,14 @@
 package rs.raf.banka2_bek.interbank.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 import rs.raf.banka2_bek.interbank.config.InterbankProperties;
+import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
 import rs.raf.banka2_bek.interbank.protocol.Message;
 import rs.raf.banka2_bek.interbank.protocol.MessageType;
 
@@ -87,24 +94,66 @@ import rs.raf.banka2_bek.interbank.protocol.MessageType;
 ================================================================================
 */
 @Service
+@RequiredArgsConstructor
 public class InterbankClient {
 
-    private final InterbankProperties properties;
-    private final BankRoutingService routing;
+    private final InterbankProperties interbankProperties;
+    private final BankRoutingService bankRoutingService;
+    private final ObjectMapper objectMapper;
+    private final RestClient restClient;
+
     // TODO: injectovati: ObjectMapper, InterbankMessageService (audit log),
     //   RestClient (configured sa timeout-om), MeterRegistry (metrics)
-
-    public InterbankClient(InterbankProperties properties, BankRoutingService routing) {
-        this.properties = properties;
-        this.routing = routing;
-    }
 
     public <Req, Resp> Resp sendMessage(int targetRoutingNumber,
                                          MessageType type,
                                          Message<Req> envelope,
                                          Class<Resp> responseType) {
-        // TODO: §2.11 POST /interbank, X-Api-Key header
-        throw new UnsupportedOperationException("TODO: implementirati InterbankClient.sendMessage");
+
+        InterbankProperties.PartnerBank partnerBank = bankRoutingService.resolvePartnerByRouting(targetRoutingNumber)
+                .orElseThrow( () -> new InterbankExceptions.InterbankProtocolException(
+                        "Target routing number " + targetRoutingNumber + " could not be resolved."
+                ));
+
+        try {
+            String serializedEnvelope = objectMapper.writeValueAsString(envelope);
+            ResponseEntity<String> response = restClient
+                    .post()
+                    .uri(partnerBank.getBaseUrl() + "/interbank")
+                    .header("X-Api-Key", partnerBank.getOutboundToken())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(serializedEnvelope)
+                    .retrieve()
+                    .onStatus(status -> status.is4xxClientError() ||
+                            status.is5xxServerError(), (request, res) -> {
+                        if (res.getStatusCode().value() == 401)
+                            throw new InterbankExceptions.InterbankAuthException(
+                                    "Invalid API key for routing " + targetRoutingNumber + ".");
+                        throw new InterbankExceptions.InterbankCommunicationException(
+                                "HTTP " + res.getStatusCode().value() + " from routing number " + targetRoutingNumber
+                        );
+                    })
+                    .toEntity(String.class);
+
+            int statusCode = response.getStatusCode().value();
+
+            if (statusCode == 202 || responseType == Void.class)
+                return null;
+
+            if (statusCode == 200) {
+                try {
+                    return objectMapper.readValue(response.getBody(), responseType);
+                } catch (JsonProcessingException e) {
+                    throw new InterbankExceptions.InterbankProtocolException(
+                            "Response could not be deserialized " + e.getMessage() + "."
+                    );
+                }
+            }
+            return null;
+        }
+        catch (JsonProcessingException e) {
+            throw new InterbankExceptions.InterbankProtocolException("Envelope serialization failed with message : " + e.getMessage());
+        }
     }
 
     public java.util.List<rs.raf.banka2_bek.interbank.protocol.PublicStock> fetchPublicStocks(int routingNumber) {

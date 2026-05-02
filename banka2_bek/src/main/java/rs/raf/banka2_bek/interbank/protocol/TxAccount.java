@@ -1,5 +1,8 @@
 package rs.raf.banka2_bek.interbank.protocol;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 /**
  * Spec ref: protokol §2.6 Accounts
  *
@@ -11,8 +14,15 @@ package rs.raf.banka2_bek.interbank.protocol;
  *
  * JSON: `{type: 'PERSON', id: ForeignBankId} | {type: 'ACCOUNT', num: string} | {type: 'OPTION', id: ForeignBankId}`
  *
- * TODO: Jackson @JsonTypeInfo / custom deserializer (vidi Asset.java).
  */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes(
+        {
+        @JsonSubTypes.Type(value = TxAccount.Person.class, name = "PERSON"),
+        @JsonSubTypes.Type(value = TxAccount.Account.class, name = "ACCOUNT"),
+        @JsonSubTypes.Type(value = TxAccount.Option.class, name = "OPTION")
+    }
+)
 public sealed interface TxAccount permits TxAccount.Person, TxAccount.Account, TxAccount.Option {
 
     record Person(ForeignBankId id) implements TxAccount {}
