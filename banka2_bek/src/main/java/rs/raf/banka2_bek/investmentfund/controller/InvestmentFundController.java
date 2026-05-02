@@ -1,9 +1,16 @@
 package rs.raf.banka2_bek.investmentfund.controller;
 
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.investmentfund.dto.InvestmentFundDtos.*;
+import rs.raf.banka2_bek.investmentfund.service.InvestmentFundService;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -39,21 +46,23 @@ import java.util.List;
 */
 @RestController
 @RequestMapping("/funds")
+@RequiredArgsConstructor
 public class InvestmentFundController {
 
-    // TODO: injectovati InvestmentFundService
+    private final InvestmentFundService investmentFundService;
+    private final EmployeeRepository employeeRepository;
 
     @GetMapping
     public ResponseEntity<List<InvestmentFundSummaryDto>> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String sort,
             @RequestParam(required = false) String direction) {
-        throw new UnsupportedOperationException("TODO");
+        return ResponseEntity.ok(investmentFundService.listDiscovery(search, sort, direction));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<InvestmentFundDetailDto> details(@PathVariable Long id) {
-        throw new UnsupportedOperationException("TODO");
+        return ResponseEntity.ok(investmentFundService.getFundDetails(id));
     }
 
     @GetMapping("/{id}/performance")
@@ -70,8 +79,11 @@ public class InvestmentFundController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN', 'SUPERVISOR')")
     public ResponseEntity<InvestmentFundDetailDto> create(@Valid @RequestBody CreateFundDto dto) {
-        throw new UnsupportedOperationException("TODO");
+        Long supervisorId = getCurrentEmployeeId();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(investmentFundService.createFund(dto, supervisorId));
     }
 
     @PostMapping("/{id}/invest")
@@ -92,7 +104,16 @@ public class InvestmentFundController {
     }
 
     @GetMapping("/bank-positions")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN', 'SUPERVISOR')")
     public ResponseEntity<List<ClientFundPositionDto>> bankPositions() {
         throw new UnsupportedOperationException("TODO");
+    }
+
+    private Long getCurrentEmployeeId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String email = auth.getName();
+        return employeeRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalStateException("Employee with email " + email + " not found."))
+                .getId();
     }
 }

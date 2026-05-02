@@ -1,14 +1,23 @@
 package rs.raf.banka2_bek.interbank.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import rs.raf.banka2_bek.interbank.config.InterbankProperties;
 import rs.raf.banka2_bek.interbank.protocol.ForeignBankId;
 import rs.raf.banka2_bek.interbank.protocol.OtcNegotiation;
 import rs.raf.banka2_bek.interbank.protocol.OtcOffer;
 import rs.raf.banka2_bek.interbank.protocol.PublicStock;
 import rs.raf.banka2_bek.interbank.protocol.UserInformation;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
 
 /*
 ================================================================================
@@ -194,42 +203,82 @@ NAPOMENA O OPCIJAMA:
  i debit-ovan k*pi sredstvima — vidi §2.7.2 i §2.8.6 verifikacija.
 ================================================================================
 */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class OtcNegotiationService {
+
+    /** TTL za §3.1 cache (DoD: "Cache 5 min"). */
+    static final Duration PUBLIC_STOCK_TTL = Duration.ofMinutes(5);
+
+    private final InterbankClient client;
+    private final InterbankProperties properties;
+
+    /** Cache po routing number-u partnerske banke. ConcurrentHashMap (low contention). */
+    private final Map<Integer, CachedPublicStocks> publicStockCache = new ConcurrentHashMap<>();
 
     @Transactional
     public List<PublicStock> fetchRemotePublicStocks(int routingNumber) {
-        throw new UnsupportedOperationException("TODO: §3.1 GET /public-stock outbound");
+        Instant now = Instant.now();
+        CachedPublicStocks cached = publicStockCache.get(routingNumber);
+        if (cached != null && cached.isFresh(now)) {
+            return cached.stocks();
+        }
+        List<PublicStock> stocks = client.fetchPublicStocks(routingNumber);
+        publicStockCache.put(routingNumber, new CachedPublicStocks(stocks, now));
+        return stocks;
     }
 
     @Transactional
     public ForeignBankId createNegotiation(OtcOffer offer) {
-        throw new UnsupportedOperationException("TODO: §3.2 POST /negotiations outbound");
+        validateOutboundOffer(offer);
+        if (!offer.buyerId().equals(offer.lastModifiedBy())) {
+            throw new IllegalArgumentException(
+                    "Pri kreiranju pregovora lastModifiedBy mora biti buyerId.");
+        }
+        int sellerRouting = offer.sellerId().routingNumber();
+        ForeignBankId negotiationId = client.postNegotiation(sellerRouting, offer);
+        publicStockCache.remove(sellerRouting);
+        log.info("OTC outbound: created negotiation {} at bank {}", negotiationId, sellerRouting);
+        return negotiationId;
     }
 
     @Transactional
     public void postCounterOffer(ForeignBankId negotiationId, OtcOffer updated) {
-        throw new UnsupportedOperationException("TODO: §3.3 PUT /negotiations/{rn}/{id} outbound");
+        if (negotiationId == null) throw new IllegalArgumentException("negotiationId ne sme biti null");
+        validateOutboundOffer(updated);
+        ensureLocalParty(updated.lastModifiedBy(),
+                "Counter-offer mora biti potpisan od strane korisnika nase banke");
+        client.putCounterOffer(negotiationId, updated);
+        log.info("OTC outbound: counter-offered negotiation {} (lastModifiedBy={})",
+                negotiationId, updated.lastModifiedBy());
     }
 
     @Transactional
     public OtcNegotiation readNegotiation(ForeignBankId negotiationId) {
-        throw new UnsupportedOperationException("TODO: §3.4 GET /negotiations/{rn}/{id} outbound");
+        if (negotiationId == null) throw new IllegalArgumentException("negotiationId ne sme biti null");
+        return client.getNegotiation(negotiationId);
     }
 
     @Transactional
     public void closeNegotiation(ForeignBankId negotiationId) {
-        throw new UnsupportedOperationException("TODO: §3.5 DELETE /negotiations/{rn}/{id} outbound");
+        if (negotiationId == null) throw new IllegalArgumentException("negotiationId ne sme biti null");
+        client.deleteNegotiation(negotiationId);
+        log.info("OTC outbound: closed negotiation {}", negotiationId);
     }
 
     @Transactional
     public void acceptOffer(ForeignBankId negotiationId) {
-        throw new UnsupportedOperationException("TODO: §3.6 GET /negotiations/{rn}/{id}/accept outbound");
+        if (negotiationId == null) throw new IllegalArgumentException("negotiationId ne sme biti null");
+        client.acceptNegotiation(negotiationId);
+        publicStockCache.remove(negotiationId.routingNumber());
+        log.info("OTC outbound: accepted negotiation {}", negotiationId);
     }
 
     @Transactional
     public UserInformation resolveUserName(ForeignBankId userId) {
-        throw new UnsupportedOperationException("TODO: §3.7 GET /user/{rn}/{id} outbound");
+        if (userId == null) throw new IllegalArgumentException("userId ne sme biti null");
+        return client.getUserInfo(userId);
     }
 
     @Transactional
@@ -265,5 +314,59 @@ public class OtcNegotiationService {
     @Transactional
     public UserInformation serveUserInfo(String localUserId) {
         throw new UnsupportedOperationException("TODO: §3.7 inbound");
+    }
+
+    // ────────────────────────── helpers (T2 outbound) ──────────────────────────
+
+    private void validateOutboundOffer(OtcOffer offer) {
+        if (offer == null) throw new IllegalArgumentException("offer ne sme biti null");
+        if (offer.buyerId() == null) throw new IllegalArgumentException("offer.buyerId ne sme biti null");
+        if (offer.sellerId() == null) throw new IllegalArgumentException("offer.sellerId ne sme biti null");
+        if (offer.lastModifiedBy() == null) throw new IllegalArgumentException("offer.lastModifiedBy ne sme biti null");
+        if (offer.stock() == null) throw new IllegalArgumentException("offer.stock ne sme biti null");
+        if (offer.pricePerUnit() == null) throw new IllegalArgumentException("offer.pricePerUnit ne sme biti null");
+        if (offer.premium() == null) throw new IllegalArgumentException("offer.premium ne sme biti null");
+        if (offer.amount() == null) throw new IllegalArgumentException("offer.amount ne sme biti null");
+        if (offer.amount().signum() <= 0) {
+            throw new IllegalArgumentException("amount mora biti > 0 (zadato: " + offer.amount() + ")");
+        }
+        if (offer.pricePerUnit().amount() == null || offer.pricePerUnit().amount().signum() <= 0) {
+            throw new IllegalArgumentException("pricePerUnit mora biti > 0");
+        }
+        if (offer.premium().amount() == null || offer.premium().amount().signum() < 0) {
+            throw new IllegalArgumentException("premium ne moze biti negativan");
+        }
+        OffsetDateTime settlement = offer.settlementDate();
+        if (settlement == null || !settlement.isAfter(OffsetDateTime.now())) {
+            throw new IllegalArgumentException(
+                    "settlementDate mora biti u buducnosti (zadato: " + settlement + ")");
+        }
+        if (offer.buyerId().equals(offer.sellerId())) {
+            throw new IllegalArgumentException("buyer i seller ne mogu biti isto lice");
+        }
+    }
+
+    private void ensureLocalParty(ForeignBankId who, String message) {
+        Integer myRouting = properties.getMyRoutingNumber();
+        if (myRouting == null) {
+            throw new InterbankExceptions.InterbankException(
+                    "interbank.my-routing-number nije konfigurisan u properties.");
+        }
+        if (who.routingNumber() != myRouting) {
+            throw new IllegalArgumentException(
+                    message + " (rn=" + who.routingNumber() + ", nasa=" + myRouting + ")");
+        }
+    }
+
+    /** Test hook — programmatic cache invalidation (paket-private). */
+    void invalidatePublicStockCache(int routingNumber) {
+        publicStockCache.remove(routingNumber);
+    }
+
+    /** TTL-tracked cache entry za §3.1 rezultate. Package-private za testove. */
+    record CachedPublicStocks(List<PublicStock> stocks, Instant fetchedAt) {
+        boolean isFresh(Instant now) {
+            return Duration.between(fetchedAt, now).compareTo(PUBLIC_STOCK_TTL) < 0;
+        }
     }
 }
