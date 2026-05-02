@@ -694,3 +694,85 @@ WHERE u.email = 'milica.nikolic@gmail.com' AND l.ticker = 'AMZN'
 AND NOT EXISTS (
     SELECT 1 FROM portfolios p WHERE p.user_id = u.id AND p.listing_id = l.id
 );
+
+
+-- ============================================================
+-- T12 — Vlasnik banke kao clients red + investicioni fond + pozicije
+-- ============================================================
+-- KONTEKST (Celina 4, Napomene 1 i 2):
+--   „Banka kao entitet ima vlasnika (klijenta), pa se bankine investicije vode
+--    pod tim klijentom. Klijent (u ClientFundPosition) je klijent koji je
+--    vlasnik banke.“
+--
+-- Po zadatku T12, vlasnika banke modelujemo kao Client sa imenom „Banka 2 d.o.o.“
+-- — to znaci da je u ovom seed-u sama banka (kao pravno lice) ujedno i klijent
+-- vlasnik. Drugim recima: klijent koji predstavlja vlasnika banke MOZE biti
+-- (i ovde JESTE) sama banka. Alternativa bi bila zaseban Client za fizickog
+-- osnivaca/drugu firmu — model isto podrzava (samo postavi drugi email u
+-- bank.owner-client-email i ubaci odgovarajuci clients red).
+--
+-- Na taj clients red pokazuje InvestmentFund.owner_client_id i pod njim se
+-- belezi svaka bankina pozicija u ClientFundPosition.
+--
+-- Razlika u odnosu na racune banke (zasto dva razlicita reda):
+--   * vlasnik fonda kao investicija   -> Client „Banka 2 d.o.o.“ (banka2.entity@banka2.rs)
+--   * vlasnik racuna fonda i ostalih
+--     bankinih racuna                 -> Company „Banka 2025 Tim 2“ (id=3)
+-- Ovo je NAMERNO razdvojeno jer Account.isOwnerValid() zahteva client XOR company,
+-- a svi bankini racuni vec koriste firmu kao vlasnika. Iako konceptualno oba reda
+-- predstavljaju „banku kao entitet“, zbog te ogranicenja u modelu (account mora
+-- imati ili klijenta ili firmu, ne oboje) tehnicki su to dva zasebna reda.
+-- Ne menjati bez koordinacije sa T7/T8 jer oni invest/withdraw rade preko `accounts`.
+
+INSERT INTO clients (first_name, last_name, date_of_birth, gender, email, phone, address,
+                     password, salt_password, active, created_at)
+SELECT 'Banka 2', 'd.o.o.', NULL, 'OTHER', 'banka2.entity@banka2.rs', '+381 11 000 0000', 'Beograd',
+       '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+       'c2VlZF9iYW5rX2VudF9f', 1, NOW()
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM clients c WHERE c.email = 'banka2.entity@banka2.rs');
+
+-- Račun fonda Alpha Seed — vlasnik je `companies` red banke (kao i ostali bankini računi).
+INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
+                      client_id, company_id, employee_id,
+                      balance, available_balance,
+                      daily_limit, monthly_limit,
+                      daily_spending, monthly_spending,
+                      maintenance_fee, expiration_date, status, name, created_at)
+SELECT '222000199999999901', 'BUSINESS', 'STANDARD', 8, NULL, 3, 1,
+       1000000.0000, 1000000.0000,
+       999999999.0000, 999999999.0000,
+       0.0000, 0.0000, 0.0000, '2050-01-01', 'ACTIVE', 'Alpha Seed — račun fonda', NOW()
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.account_number = '222000199999999901');
+
+INSERT INTO investment_funds (name, description, minimum_contribution, manager_id, fund_account_id, owner_client_id, created_at, active)
+SELECT
+  'Alpha Seed Fund',
+  'Integracioni seed fond (T12)',
+  1000.0000,
+  1,
+  (SELECT id FROM accounts WHERE account_number = '222000199999999901' LIMIT 1),
+  (SELECT id FROM clients WHERE email = 'banka2.entity@banka2.rs' LIMIT 1),
+  NOW(),
+  1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM investment_funds f WHERE f.name = 'Alpha Seed Fund');
+
+INSERT INTO client_fund_positions (client_id, fund_id, total_invested_amount)
+SELECT c.id, f.id, 2500000.0000
+FROM clients c
+CROSS JOIN investment_funds f
+WHERE c.email = 'banka2.entity@banka2.rs' AND f.name = 'Alpha Seed Fund'
+AND NOT EXISTS (
+  SELECT 1 FROM client_fund_positions p WHERE p.client_id = c.id AND p.fund_id = f.id
+);
+
+INSERT INTO client_fund_positions (client_id, fund_id, total_invested_amount)
+SELECT c.id, f.id, 10000.0000
+FROM clients c
+CROSS JOIN investment_funds f
+WHERE c.email = 'stefan.jovanovic@gmail.com' AND f.name = 'Alpha Seed Fund'
+AND NOT EXISTS (
+  SELECT 1 FROM client_fund_positions p WHERE p.client_id = c.id AND p.fund_id = f.id
+);
