@@ -2,6 +2,7 @@ package rs.raf.banka2_bek.interbank.model;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
@@ -54,6 +55,7 @@ import java.time.LocalDateTime;
         @Index(name = "idx_ibm_status_attempt", columnList = "status, last_attempt_at")
 })
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class InterbankMessage {
@@ -115,4 +117,5 @@ public class InterbankMessage {
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
+
 }

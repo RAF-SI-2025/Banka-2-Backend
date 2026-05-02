@@ -1,62 +1,93 @@
 package rs.raf.banka2_bek.interbank.scheduler;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
+import rs.raf.banka2_bek.interbank.model.InterbankMessage;
+import rs.raf.banka2_bek.interbank.model.InterbankMessageStatus;
+import rs.raf.banka2_bek.interbank.protocol.*;
+import rs.raf.banka2_bek.interbank.repository.InterbankMessageRepository;
+import rs.raf.banka2_bek.interbank.service.InterbankClient;
+import rs.raf.banka2_bek.interbank.service.InterbankMessageService;
 
-/*
-================================================================================
- TODO — RETRY PETLJA ZA NEPOTVRDJENE PORUKE (PROTOKOL §2.9)
- Zaduzen: BE tim
- Spec ref: protokol §2.9 Message exchange — "Svaka poruka mora biti retry-ovana
-           dok se ne prizna" (at-most-once preko idempotence kljuceva)
---------------------------------------------------------------------------------
- FLOW:
-  Svaka 2 minuta proveravamo InterbankMessage gde je status=PENDING i
-  poslednji pokusaj stariji od interval praga. Za svaku poruku:
-   1. Ako retryCount >= maxRetries:
-      - status=STUCK, log ERROR (supervizor treba intervenciju)
-      - Lokalna transakcija ostaje u PREPARED (rezervisana sredstva); manualna
-        akcija ili supervisor MARK STUCK -> ROLLBACK lokalno
-   2. Inace:
-      - InterbankClient.sendMessage(routingNumber, type, envelope, responseType)
-      - 200/204 -> markOutboundSent (status=SENT)
-      - 202     -> ostani PENDING (legitimno cekanje)
-      - 4xx/5xx/network -> markOutboundFailed (retryCount++)
-      - 401     -> auth issue, skip retry, log ERROR
+import java.time.LocalDateTime;
+import java.util.List;
 
- IDEMPOTENCY (§2.2):
-  Idempotence key se ZADRZAVA pri retry-u. Druga banka pri ponovnom
-  prijemu vraca isti odgovor (cache hit u InterbankMessageService).
-
- KONFIGURACIJA:
-   interbank.retry.interval-seconds=30
-   interbank.retry.max-retries=10
-   interbank.retry.stuck-timeout-minutes=30
-
- TESTOVI:
-  - Retry se ne dešava pre interval praga
-  - Max retries -> STUCK + log
-  - 202 ne uvecava retryCount, ostaje PENDING
-  - Uspesan retry oslobadja iz pending-a
-  - Idempotency: ponovljeni response je cache-iran kod druge banke
-================================================================================
-*/
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class InterbankRetryScheduler {
 
-    // TODO: injectovati InterbankMessageRepository, InterbankClient, InterbankMessageService
+    private final InterbankMessageRepository messageRepository;
+    private final InterbankClient client;
+    private final InterbankMessageService messageService;
+    private final ObjectMapper objectMapper;
 
-    /**
-     * Cron svaka 2 minuta. Snizi na 30s ako hoces brzi reagovanje
-     * (i azuriraj interbank.retry.interval-seconds u skladu).
-     */
     @Scheduled(fixedRate = 120_000)
     public void retryStaleMessages() {
-        // TODO:
-        //  1. messageRepo.findPendingForRetry(now - intervalSeconds)
-        //  2. za svaku:
-        //     - if retryCount >= maxRetries: markOutboundFailed → STUCK
-        //     - else: client.sendMessage(...) + recordovati ishod
-        //  3. Atomicno per-poruka (osim send-a) — ne blokiraj druge poruke
+        LocalDateTime cutoff = LocalDateTime.now().minusSeconds(120);
+        List<InterbankMessage> pending =
+                messageRepository.findPendingForRetry(InterbankMessageStatus.PENDING, cutoff);
+
+        for (InterbankMessage msg : pending) {
+            try {
+                retryOne(msg);
+            } catch (Exception e) {
+                log.error("Retry error msg id={} type={}: {}",
+                        msg.getId(), msg.getMessageType(), e.getMessage());
+            }
+        }
+    }
+
+    private void retryOne(InterbankMessage msg) throws Exception {
+        IdempotenceKey key = new IdempotenceKey(
+                msg.getSenderRoutingNumber(), msg.getLocallyGeneratedKey());
+        int targetRn = msg.getPeerRoutingNumber();
+
+        switch (msg.getMessageType()) {
+            case NEW_TX -> {
+                Message<Transaction> env = objectMapper.readValue(
+                        msg.getRequestBody(), new TypeReference<Message<Transaction>>() {});
+                try {
+                    TransactionVote vote = client.sendMessage(
+                            targetRn, MessageType.NEW_TX, env, TransactionVote.class);
+                    if (vote != null) {
+                        messageService.markOutboundSent(key, 200,
+                                objectMapper.writeValueAsString(vote));
+                    } else {
+                        messageService.markOutboundSent(key, 202, null);
+                    }
+                } catch (InterbankExceptions.InterbankCommunicationException |
+                         InterbankExceptions.InterbankAuthException e) {
+                    messageService.markOutboundFailed(key, e.getMessage());
+                }
+            }
+            case COMMIT_TX -> {
+                Message<CommitTransaction> env = objectMapper.readValue(
+                        msg.getRequestBody(), new TypeReference<Message<CommitTransaction>>() {});
+                try {
+                    client.sendMessage(targetRn, MessageType.COMMIT_TX, env, Void.class);
+                    messageService.markOutboundSent(key, 204, null);
+                } catch (InterbankExceptions.InterbankCommunicationException |
+                         InterbankExceptions.InterbankAuthException e) {
+                    messageService.markOutboundFailed(key, e.getMessage());
+                }
+            }
+            case ROLLBACK_TX -> {
+                Message<RollbackTransaction> env = objectMapper.readValue(
+                        msg.getRequestBody(), new TypeReference<Message<RollbackTransaction>>() {});
+                try {
+                    client.sendMessage(targetRn, MessageType.ROLLBACK_TX, env, Void.class);
+                    messageService.markOutboundSent(key, 204, null);
+                } catch (InterbankExceptions.InterbankCommunicationException |
+                         InterbankExceptions.InterbankAuthException e) {
+                    messageService.markOutboundFailed(key, e.getMessage());
+                }
+            }
+        }
     }
 }
