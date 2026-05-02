@@ -108,7 +108,7 @@ public class InterbankInboundController {
             return dispatchByMessageType(messageType, idempotenceKey, messageNode);
 
         if (!cashedOpt.get().isBlank())
-            return ResponseEntity.status(200).body(cashedOpt.get());
+            return ResponseEntity.ok(objectMapper.readTree(cashedOpt.get()));
 
         return ResponseEntity.noContent().build();
 

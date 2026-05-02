@@ -21,7 +21,6 @@ import rs.raf.banka2_bek.interbank.model.InterbankTransaction;
 import rs.raf.banka2_bek.interbank.model.InterbankTransactionStatus;
 import rs.raf.banka2_bek.interbank.protocol.*;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
-import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
@@ -54,7 +53,6 @@ class TransactionExecutorServiceTest {
     @Mock private PortfolioRepository portfolioRepository;
     @Mock private InterbankReservationApplier reservationApplier;
     @Mock private ListingRepository listingRepository;
-    @Mock private CurrencyConversionService currencyConversionService;
 
     /** Self-proxy replaced with a mock so @Transactional sub-methods can be stubbed. */
     @Mock private TransactionExecutorService self;
@@ -79,7 +77,7 @@ class TransactionExecutorServiceTest {
         service = new TransactionExecutorService(
                 messageService, client, routing, txRepo, objectMapper,
                 accountRepository, portfolioRepository, reservationApplier,
-                listingRepository, currencyConversionService);
+                listingRepository);
 
         ReflectionTestUtils.setField(service, "self", self);
 
@@ -480,7 +478,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK credit — portfolio not found → NO + NO_SUCH_ASSET")
     void prepareLocal_portfolioMissing_noVote() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(1L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.empty());
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -494,7 +492,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK credit — insufficient quantity → NO + INSUFFICIENT_ASSET")
     void prepareLocal_insufficientStock_noVote() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(1L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.of(buildPortfolio(3))); // needs 10, has 3
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -508,7 +506,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK YES → reserveStock called with correct userId and listingId")
     void prepareLocal_stockYes_reservesStock() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(7L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.of(buildPortfolio(20))); // has 20, needs 10
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -552,12 +550,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), eq("RSD"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.commitLocal(tx.transactionId());
@@ -567,36 +559,12 @@ class TransactionExecutorServiceTest {
     }
 
     @Test
-    @DisplayName("commitLocal: currency conversion applied when posting currency differs from account currency")
-    void commitLocal_currencyConversionApplied() throws Exception {
-        Transaction tx = localMonasTxEur();
-        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
-        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
-                .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(50000), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(11700));
-        stubTxSave();
-
-        service.commitLocal(tx.transactionId());
-
-        verify(currencyConversionService, times(2)).convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD"));
-        verify(reservationApplier).commitMonas(eq(ACCT_B), eq(BigDecimal.valueOf(11700)), eq(false));
-    }
-
-    @Test
     @DisplayName("commitLocal: status set to COMMITTED with timestamp")
     void commitLocal_statusSetToCommitted() throws Exception {
         Transaction tx = localMonasTx();
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(any()))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.commitLocal(tx.transactionId());
@@ -645,8 +613,8 @@ class TransactionExecutorServiceTest {
 
         service.commitLocal(tx.transactionId());
 
-        verify(reservationApplier).commitStock(eq(99L), eq("CLIENT"), eq(7L), eq(10), eq(true));
-        verify(reservationApplier).commitStock(eq(42L), eq("CLIENT"), eq(7L), eq(10), eq(false));
+        verify(reservationApplier).commitStock(eq(99L), eq("CLIENT"), any(Listing.class), eq(10), eq(true));
+        verify(reservationApplier).commitStock(eq(42L), eq("CLIENT"), any(Listing.class), eq(10), eq(false));
     }
 
     @Test
@@ -673,34 +641,12 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.rollbackLocal(tx.transactionId());
 
         verify(reservationApplier).releaseMonas(eq(ACCT_B), eq(BigDecimal.valueOf(100)));
         verify(reservationApplier, never()).releaseMonas(eq(ACCT_A), any());
-        verify(accountRepository, never()).findForUpdateByAccountNumber(ACCT_A);
-    }
-
-    @Test
-    @DisplayName("rollbackLocal: releaseMonas called with currency-converted amount")
-    void rollbackLocal_releaseMonasWithConvertedAmount() throws Exception {
-        Transaction tx = localMonasTxEur();
-        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
-        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
-                .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(50000), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(11700));
-        stubTxSave();
-
-        service.rollbackLocal(tx.transactionId());
-
-        verify(reservationApplier).releaseMonas(eq(ACCT_B), eq(BigDecimal.valueOf(11700)));
     }
 
     @Test
@@ -710,9 +656,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.rollbackLocal(tx.transactionId());
@@ -887,11 +830,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.handleCommitTx(new CommitTransaction(tx.transactionId()), key);
@@ -926,9 +864,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.handleRollbackTx(new RollbackTransaction(tx.transactionId()), key);

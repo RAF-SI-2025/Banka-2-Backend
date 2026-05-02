@@ -8,6 +8,7 @@ import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
+import rs.raf.banka2_bek.stock.model.Listing;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -88,9 +89,9 @@ public class InterbankReservationApplier {
         portfolioRepository.save(portfolio);
     }
 
-    public void commitStock(Long userId, String role, Long listingId, int quantity, boolean isDebit){
+    public void commitStock(Long userId, String role, Listing listing, int quantity, boolean isDebit){
         if (isDebit) {
-            Optional<Portfolio> current = portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(userId, role, listingId);
+            Optional<Portfolio> current = portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(userId, role, listing.getId());
             if (current.isPresent()) {
                 Portfolio portfolio = current.get();
                 portfolio.setQuantity(portfolio.getQuantity() + quantity);
@@ -99,7 +100,11 @@ public class InterbankReservationApplier {
                 Portfolio portfolio = Portfolio.builder()
                         .userId(userId)
                         .userRole(role)
-                        .listingId(listingId)
+                        .listingId(listing.getId())
+                        .listingTicker(listing.getTicker())
+                        .listingName(listing.getName())
+                        .listingType(listing.getListingType().name())
+                        .averageBuyPrice(listing.getPrice() != null ? listing.getPrice() : BigDecimal.ZERO)
                         .quantity(quantity)
                         .reservedQuantity(0)
                         .publicQuantity(0)
@@ -108,9 +113,9 @@ public class InterbankReservationApplier {
             }
         }
         else {
-            Portfolio portfolio = portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(userId, role, listingId)
+            Portfolio portfolio = portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(userId, role, listing.getId())
                   .orElseThrow(
-                          () -> new InterbankExceptions.InterbankProtocolException("NO_SUCH_ASSET: no portfolio exists for listing " + listingId)
+                          () -> new InterbankExceptions.InterbankProtocolException("NO_SUCH_ASSET: no portfolio exists for listing " + listing.getId())
                   );
             portfolio.setQuantity(portfolio.getQuantity() - quantity);
             portfolio.setReservedQuantity(Math.max(0, portfolio.getReservedQuantity() - quantity));
