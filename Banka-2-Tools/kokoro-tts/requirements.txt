@@ -1,0 +1,24 @@
+# Kokoro TTS sidecar — Phase 5 voice output
+# Reference: huggingface.co/hexgrad/Kokoro-82M (Apache 2.0)
+
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.10.4
+
+# Kokoro model dependencies
+# kokoro==0.7.x je poslednja kompatibilna sa misaki<0.9 koji ima
+# EspeakWrapper.set_data_path (issue hexgrad/kokoro#206 — misaki 0.9+ je
+# breaking promenio API). Sa 0.9.x kokorom + novim misaki, prvi /tts call
+# puca AttributeError. Pin: kokoro 0.7.16 + automatski kompatibilna misaki.
+kokoro==0.7.16
+torch==2.5.1
+soundfile==0.12.1
+numpy==1.26.4
+
+# Audio post-processing
+scipy==1.14.1
+
+# Phonemizer 3.2.1 (ne 3.3.0+) — 3.3.0 je breaking removed EspeakWrapper.set_data_path
+# koji misaki 0.7.x interno poziva. Sa 3.2.1 + sistemskim espeak-ng iz apt-get-a,
+# misaki automatski poziva set_data_path() i sve radi.
+phonemizer==3.2.1

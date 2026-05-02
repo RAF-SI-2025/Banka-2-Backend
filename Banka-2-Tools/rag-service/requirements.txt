@@ -1,0 +1,12 @@
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.10.4
+sentence-transformers==5.4.1
+chromadb==1.5.8
+langchain-text-splitters==1.1.2
+# Phase 5 optimizacija — TTL cache za embedding + search rezultate
+# (~30%+ CPU usteda za ponovljene query-je)
+cachetools==7.0.6
+# Phase 5 — cross-encoder reranking. ms-marco-MiniLM je bi-encoder distilled
+# u ~22MB model koji daje ~30%+ veci precision@5 nego cisti embedding search.
+# Rerank-ujemo top-20 iz ChromaDB do top-5 koji idu LLM-u kao kontekst.
