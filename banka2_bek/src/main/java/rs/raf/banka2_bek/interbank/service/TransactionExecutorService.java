@@ -12,6 +12,7 @@ import rs.raf.banka2_bek.account.model.AccountStatus;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
 import rs.raf.banka2_bek.interbank.model.InterbankOtcContract;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContractStatus;
 import rs.raf.banka2_bek.interbank.model.InterbankOtcNegotiation;
 import rs.raf.banka2_bek.interbank.model.InterbankTransaction;
 import rs.raf.banka2_bek.interbank.model.InterbankTransactionStatus;
@@ -26,6 +27,7 @@ import rs.raf.banka2_bek.stock.repository.ListingRepository;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -247,8 +249,20 @@ public class TransactionExecutorService {
                 Long userId = Long.parseLong(pe.id().id());
                 reservationApplier.commitStock(userId, "CLIENT", listing,
                         abs.intValueExact(), isDebit);
+
+            } else if (p.asset() instanceof Asset.OptionAsset oa && p.account() instanceof TxAccount.Option) {
+                ForeignBankId negId = oa.asset().negotiationId();
+                otcNegotiationRepository
+                        .findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                                negId.routingNumber(), negId.id())
+                        .ifPresent(neg ->
+                                otcContractRepository.findBySourceNegotiationId(neg.getId())
+                                        .ifPresent(contract -> {
+                                            contract.setStatus(InterbankOtcContractStatus.EXERCISED);
+                                            contract.setExercisedAt(LocalDateTime.now());
+                                            otcContractRepository.save(contract);
+                                        }));
             }
-            // OptionAsset: no-op for T1
         }
 
         ibTx.setStatus(InterbankTransactionStatus.COMMITTED);
@@ -290,6 +304,10 @@ public class TransactionExecutorService {
                                 "Listing not found: " + s.asset().ticker()));
                 Long userId = Long.parseLong(pe.id().id());
                 reservationApplier.releaseStock(userId, "CLIENT", listing.getId(), abs.intValueExact());
+
+            } else if (p.asset() instanceof Asset.OptionAsset) {
+                // Option rollback is a no-op: stocks remain reserved under the contract;
+                // the contract stays ACTIVE so the buyer can retry.
             }
         }
 
@@ -592,21 +610,50 @@ public class TransactionExecutorService {
                     }
                 }
 
-            } else if (asset instanceof Asset.OptionAsset opAsset && account instanceof TxAccount.Option op) {
+            } else if (asset instanceof Asset.OptionAsset opAsset && account instanceof TxAccount.Option) {
                 OptionDescription optionDescription = opAsset.asset();
                 ForeignBankId negotiationId = optionDescription.negotiationId();
 
-                Optional<InterbankOtcNegotiation> negotiationOptional = otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(negotiationId.routingNumber(), negotiationId.id());
-
+                Optional<InterbankOtcNegotiation> negotiationOptional =
+                        otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                                negotiationId.routingNumber(), negotiationId.id());
                 if (negotiationOptional.isEmpty()) {
                     violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+                    continue;
                 }
 
+                Optional<InterbankOtcContract> contractOptional =
+                        otcContractRepository.findBySourceNegotiationId(negotiationOptional.get().getId());
+                if (contractOptional.isEmpty()) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+                    continue;
+                }
 
+                InterbankOtcContract contract = contractOptional.get();
 
-                //b2b protocol 2.8.6 - pravilo 5
+                // §2.8.6 rule 5: option must not be used or expired
+                if (contract.getStatus() != InterbankOtcContractStatus.ACTIVE
+                        || contract.getSettlementDate().isBefore(LocalDate.now())) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_USED_OR_EXPIRED, p));
+                    continue;
+                }
 
-                //b2b protocol 2.8.6 - pravilo 6
+                // §2.8.6 rule 6: companion postings must match contract terms exactly
+                BigDecimal requiredMoney = contract.getQuantity().multiply(contract.getStrikePrice());
+
+                boolean stockOk = tx.postings().stream().anyMatch(sp ->
+                        sp.asset() instanceof Asset.Stock ss
+                        && ss.asset().ticker().equals(contract.getTicker())
+                        && sp.amount().abs().compareTo(contract.getQuantity()) == 0);
+
+                boolean moneyOk = tx.postings().stream().anyMatch(mp ->
+                        mp.asset() instanceof Asset.Monas mm
+                        && mm.asset().currency().name().equals(contract.getStrikeCurrency())
+                        && mp.amount().abs().compareTo(requiredMoney) == 0);
+
+                if (!stockOk || !moneyOk) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT, p));
+                }
 
             } else {
                 violations.add(new NoVoteReason(NoVoteReason.Reason.UNACCEPTABLE_ASSET, p));
