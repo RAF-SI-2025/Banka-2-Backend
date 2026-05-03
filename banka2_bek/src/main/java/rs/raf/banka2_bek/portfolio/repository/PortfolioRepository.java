@@ -32,6 +32,8 @@ public interface PortfolioRepository extends JpaRepository<Portfolio, Long> {
     @Query("SELECT p FROM Portfolio p WHERE p.id = :id")
     Optional<Portfolio> findByIdForUpdate(@Param("id") Long id);
 
+    Optional<Portfolio> findByUserIdAndUserRoleAndListingId(Long userId, String userRole, Long listingId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Portfolio p WHERE p.userId = :userId AND p.userRole = :userRole AND p.listingId = :listingId")
     Optional<Portfolio> findByUserIdAndUserRoleAndListingIdForUpdate(@Param("userId") Long userId,

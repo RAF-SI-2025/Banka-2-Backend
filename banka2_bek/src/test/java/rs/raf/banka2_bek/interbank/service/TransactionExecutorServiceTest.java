@@ -17,17 +17,23 @@ import rs.raf.banka2_bek.account.model.AccountStatus;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.currency.model.Currency;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContract;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContractStatus;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcNegotiation;
 import rs.raf.banka2_bek.interbank.model.InterbankTransaction;
 import rs.raf.banka2_bek.interbank.model.InterbankTransactionStatus;
 import rs.raf.banka2_bek.interbank.protocol.*;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcContractRepository;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcNegotiationRepository;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
-import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,7 +60,8 @@ class TransactionExecutorServiceTest {
     @Mock private PortfolioRepository portfolioRepository;
     @Mock private InterbankReservationApplier reservationApplier;
     @Mock private ListingRepository listingRepository;
-    @Mock private CurrencyConversionService currencyConversionService;
+    @Mock private InterbankOtcNegotiationRepository otcNegotiationRepository;
+    @Mock private InterbankOtcContractRepository otcContractRepository;
 
     /** Self-proxy replaced with a mock so @Transactional sub-methods can be stubbed. */
     @Mock private TransactionExecutorService self;
@@ -79,7 +86,7 @@ class TransactionExecutorServiceTest {
         service = new TransactionExecutorService(
                 messageService, client, routing, txRepo, objectMapper,
                 accountRepository, portfolioRepository, reservationApplier,
-                listingRepository, currencyConversionService);
+                listingRepository, otcNegotiationRepository, otcContractRepository);
 
         ReflectionTestUtils.setField(service, "self", self);
 
@@ -480,7 +487,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK credit — portfolio not found → NO + NO_SUCH_ASSET")
     void prepareLocal_portfolioMissing_noVote() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(1L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.empty());
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -494,7 +501,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK credit — insufficient quantity → NO + INSUFFICIENT_ASSET")
     void prepareLocal_insufficientStock_noVote() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(1L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.of(buildPortfolio(3))); // needs 10, has 3
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -508,7 +515,7 @@ class TransactionExecutorServiceTest {
     @DisplayName("prepareLocal: STOCK YES → reserveStock called with correct userId and listingId")
     void prepareLocal_stockYes_reservesStock() {
         when(listingRepository.findByTicker("AAPL")).thenReturn(Optional.of(buildListing(7L, "AAPL")));
-        when(portfolioRepository.findByUserIdAndUserRoleAndListingIdForUpdate(anyLong(), any(), anyLong()))
+        when(portfolioRepository.findByUserIdAndUserRoleAndListingId(anyLong(), any(), anyLong()))
                 .thenReturn(Optional.of(buildPortfolio(20))); // has 20, needs 10
 
         TransactionVote vote = service.prepareLocal(localStockTx());
@@ -552,12 +559,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), eq("RSD"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.commitLocal(tx.transactionId());
@@ -567,36 +568,12 @@ class TransactionExecutorServiceTest {
     }
 
     @Test
-    @DisplayName("commitLocal: currency conversion applied when posting currency differs from account currency")
-    void commitLocal_currencyConversionApplied() throws Exception {
-        Transaction tx = localMonasTxEur();
-        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
-        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
-                .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(50000), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(11700));
-        stubTxSave();
-
-        service.commitLocal(tx.transactionId());
-
-        verify(currencyConversionService, times(2)).convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD"));
-        verify(reservationApplier).commitMonas(eq(ACCT_B), eq(BigDecimal.valueOf(11700)), eq(false));
-    }
-
-    @Test
     @DisplayName("commitLocal: status set to COMMITTED with timestamp")
     void commitLocal_statusSetToCommitted() throws Exception {
         Transaction tx = localMonasTx();
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(any()))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.commitLocal(tx.transactionId());
@@ -645,8 +622,8 @@ class TransactionExecutorServiceTest {
 
         service.commitLocal(tx.transactionId());
 
-        verify(reservationApplier).commitStock(eq(99L), eq("CLIENT"), eq(7L), eq(10), eq(true));
-        verify(reservationApplier).commitStock(eq(42L), eq("CLIENT"), eq(7L), eq(10), eq(false));
+        verify(reservationApplier).commitStock(eq(99L), eq("CLIENT"), any(Listing.class), eq(10), eq(true));
+        verify(reservationApplier).commitStock(eq(42L), eq("CLIENT"), any(Listing.class), eq(10), eq(false));
     }
 
     @Test
@@ -673,34 +650,12 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.rollbackLocal(tx.transactionId());
 
         verify(reservationApplier).releaseMonas(eq(ACCT_B), eq(BigDecimal.valueOf(100)));
         verify(reservationApplier, never()).releaseMonas(eq(ACCT_A), any());
-        verify(accountRepository, never()).findForUpdateByAccountNumber(ACCT_A);
-    }
-
-    @Test
-    @DisplayName("rollbackLocal: releaseMonas called with currency-converted amount")
-    void rollbackLocal_releaseMonasWithConvertedAmount() throws Exception {
-        Transaction tx = localMonasTxEur();
-        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
-        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
-                .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(50000), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(eq(BigDecimal.valueOf(100)), eq("EUR"), eq("RSD")))
-                .thenReturn(BigDecimal.valueOf(11700));
-        stubTxSave();
-
-        service.rollbackLocal(tx.transactionId());
-
-        verify(reservationApplier).releaseMonas(eq(ACCT_B), eq(BigDecimal.valueOf(11700)));
     }
 
     @Test
@@ -710,9 +665,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.rollbackLocal(tx.transactionId());
@@ -887,11 +839,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_A))
-                .thenReturn(Optional.of(buildAccount(ACCT_A, "RSD", BigDecimal.ZERO, AccountStatus.ACTIVE)));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.handleCommitTx(new CommitTransaction(tx.transactionId()), key);
@@ -926,9 +873,6 @@ class TransactionExecutorServiceTest {
         InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
         when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
                 .thenReturn(Optional.of(ibt));
-        when(accountRepository.findForUpdateByAccountNumber(ACCT_B))
-                .thenReturn(Optional.of(buildAccount(ACCT_B, "RSD", BigDecimal.valueOf(500), AccountStatus.ACTIVE)));
-        when(currencyConversionService.convert(any(), any(), any())).thenReturn(BigDecimal.valueOf(100));
         stubTxSave();
 
         service.handleRollbackTx(new RollbackTransaction(tx.transactionId()), key);
@@ -947,6 +891,265 @@ class TransactionExecutorServiceTest {
         service.handleRollbackTx(new RollbackTransaction(new ForeignBankId(REMOTE_RN, "x")), key);
 
         verifyNoInteractions(txRepo, reservationApplier, accountRepository);
+    }
+
+    // =========================================================================
+    // prepareLocal — option pseudo-account (§2.8.6 rules 5 and 6)
+    // =========================================================================
+
+    @Test
+    @DisplayName("prepareLocal: option negotiation not found → NO + OPTION_NEGOTIATION_NOT_FOUND")
+    void prepareLocal_option_negotiationNotFound_noVote() {
+        when(otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                anyInt(), any())).thenReturn(Optional.empty());
+
+        TransactionVote vote = service.prepareLocal(optionOnlyTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: negotiation found but contract not found → NO + OPTION_NEGOTIATION_NOT_FOUND")
+    void prepareLocal_option_contractNotFound_noVote() {
+        InterbankOtcNegotiation neg = new InterbankOtcNegotiation();
+        neg.setId(10L);
+        when(otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                anyInt(), any())).thenReturn(Optional.of(neg));
+        when(otcContractRepository.findBySourceNegotiationId(10L)).thenReturn(Optional.empty());
+
+        TransactionVote vote = service.prepareLocal(optionOnlyTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: contract status EXERCISED → NO + OPTION_USED_OR_EXPIRED")
+    void prepareLocal_option_contractExercised_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.EXERCISED,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        TransactionVote vote = service.prepareLocal(optionOnlyTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_USED_OR_EXPIRED));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: contract status EXPIRED → NO + OPTION_USED_OR_EXPIRED")
+    void prepareLocal_option_contractExpired_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.EXPIRED,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        TransactionVote vote = service.prepareLocal(optionOnlyTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_USED_OR_EXPIRED));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: contract ACTIVE but settlementDate in the past → NO + OPTION_USED_OR_EXPIRED")
+    void prepareLocal_option_settlementDatePast_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().minusDays(1), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        TransactionVote vote = service.prepareLocal(optionOnlyTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_USED_OR_EXPIRED));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: contract valid but no stock companion posting → NO + OPTION_AMOUNT_INCORRECT")
+    void prepareLocal_option_missingStockPosting_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        // tx has balanced option postings + monas companion but NO stock
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-1");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000001"), BigDecimal.valueOf(-1500), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000002"), BigDecimal.valueOf(1500), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD)))
+        ), new ForeignBankId(MY_RN, "tx-no-stock"), null, null, null, null);
+
+        TransactionVote vote = service.prepareLocal(tx);
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: contract valid but no monas companion posting → NO + OPTION_AMOUNT_INCORRECT")
+    void prepareLocal_option_missingMoneyPosting_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-1");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "seller")), BigDecimal.valueOf(-10), new Asset.Stock(new StockDescription("AAPL"))),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "buyer")), BigDecimal.valueOf(10), new Asset.Stock(new StockDescription("AAPL")))
+        ), new ForeignBankId(MY_RN, "tx-no-monas"), null, null, null, null);
+
+        TransactionVote vote = service.prepareLocal(tx);
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: wrong stock amount → NO + OPTION_AMOUNT_INCORRECT")
+    void prepareLocal_option_wrongStockAmount_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-1");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt)),
+                // wrong stock amount: 5 instead of 10
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "seller")), BigDecimal.valueOf(-5), new Asset.Stock(new StockDescription("AAPL"))),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "buyer")), BigDecimal.valueOf(5), new Asset.Stock(new StockDescription("AAPL"))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000001"), BigDecimal.valueOf(-1500), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000002"), BigDecimal.valueOf(1500), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD)))
+        ), new ForeignBankId(MY_RN, "tx-wrong-stock-amt"), null, null, null, null);
+
+        TransactionVote vote = service.prepareLocal(tx);
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: wrong money amount → NO + OPTION_AMOUNT_INCORRECT")
+    void prepareLocal_option_wrongMoneyAmount_noVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-1");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "seller")), BigDecimal.valueOf(-10), new Asset.Stock(new StockDescription("AAPL"))),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "buyer")), BigDecimal.valueOf(10), new Asset.Stock(new StockDescription("AAPL"))),
+                // wrong money amount: 999 instead of 1500 (10 × 150)
+                new Posting(new TxAccount.Account(REMOTE_RN + "000001"), BigDecimal.valueOf(-999), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000002"), BigDecimal.valueOf(999), new Asset.Monas(new MonetaryAsset(CurrencyCode.USD)))
+        ), new ForeignBankId(MY_RN, "tx-wrong-money-amt"), null, null, null, null);
+
+        TransactionVote vote = service.prepareLocal(tx);
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.NO);
+        assertThat(vote.reasons()).allSatisfy(r ->
+                assertThat(r.reason()).isEqualTo(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT));
+    }
+
+    @Test
+    @DisplayName("prepareLocal: valid option with correct companions → YES, no reserve calls for option")
+    void prepareLocal_option_allCorrect_yesVote() {
+        stubOptionNegAndContract(buildContract(InterbankOtcContractStatus.ACTIVE,
+                LocalDate.now().plusDays(30), "AAPL", BigDecimal.valueOf(10), BigDecimal.valueOf(150), "USD"));
+
+        TransactionVote vote = service.prepareLocal(fullOptionTx("neg-1", "AAPL", 10, "USD", BigDecimal.valueOf(150)));
+
+        assertThat(vote.vote()).isEqualTo(TransactionVote.Vote.YES);
+        verifyNoInteractions(reservationApplier);
+    }
+
+    // =========================================================================
+    // commitLocal — option (§2.8.6 commit marks contract EXERCISED)
+    // =========================================================================
+
+    @Test
+    @DisplayName("commitLocal: option posting → contract marked EXERCISED with exercisedAt timestamp")
+    void commitLocal_optionPosting_contractMarkedExercised() throws Exception {
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-commit");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt))
+        ), new ForeignBankId(MY_RN, "tx-opt-commit"), null, null, null, null);
+
+        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
+        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
+                .thenReturn(Optional.of(ibt));
+        stubTxSave();
+
+        InterbankOtcNegotiation neg = new InterbankOtcNegotiation();
+        neg.setId(55L);
+        when(otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                eq(MY_RN), eq("neg-commit"))).thenReturn(Optional.of(neg));
+
+        InterbankOtcContract contract = new InterbankOtcContract();
+        contract.setStatus(InterbankOtcContractStatus.ACTIVE);
+        when(otcContractRepository.findBySourceNegotiationId(55L)).thenReturn(Optional.of(contract));
+        when(otcContractRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.commitLocal(tx.transactionId());
+
+        assertThat(contract.getStatus()).isEqualTo(InterbankOtcContractStatus.EXERCISED);
+        assertThat(contract.getExercisedAt()).isNotNull();
+        verify(otcContractRepository, atLeastOnce()).save(contract);
+    }
+
+    @Test
+    @DisplayName("commitLocal: already COMMITTED → no contract lookup (idempotent)")
+    void commitLocal_optionPosting_alreadyCommitted_noContractLookup() throws Exception {
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-idem");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt))
+        ), new ForeignBankId(MY_RN, "tx-opt-idem"), null, null, null, null);
+
+        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.COMMITTED);
+        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
+                .thenReturn(Optional.of(ibt));
+
+        service.commitLocal(tx.transactionId());
+
+        verifyNoInteractions(otcNegotiationRepository, otcContractRepository);
+    }
+
+    // =========================================================================
+    // rollbackLocal — option (no-op)
+    // =========================================================================
+
+    @Test
+    @DisplayName("rollbackLocal: option posting is a no-op — no contract lookup, no release calls")
+    void rollbackLocal_optionPosting_noOpOnContract() throws Exception {
+        ForeignBankId negId = new ForeignBankId(MY_RN, "neg-rb");
+        OptionDescription opt = buildOptionDescription(negId, "AAPL", BigDecimal.valueOf(10), "USD", BigDecimal.valueOf(150));
+        Transaction tx = new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-10), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(10), new Asset.OptionAsset(opt))
+        ), new ForeignBankId(MY_RN, "tx-opt-rb"), null, null, null, null);
+
+        InterbankTransaction ibt = savedIbt(tx, InterbankTransactionStatus.PREPARING);
+        when(txRepo.findByTransactionRoutingNumberAndTransactionIdString(anyInt(), any()))
+                .thenReturn(Optional.of(ibt));
+        stubTxSave();
+
+        service.rollbackLocal(tx.transactionId());
+
+        verifyNoInteractions(otcNegotiationRepository, otcContractRepository, reservationApplier);
+        assertThat(ibt.getStatus()).isEqualTo(InterbankTransactionStatus.ROLLED_BACK);
     }
 
     // =========================================================================
@@ -1077,5 +1280,69 @@ class TransactionExecutorServiceTest {
     private TransactionVote noVote() {
         return new TransactionVote(TransactionVote.Vote.NO,
                 List.of(new NoVoteReason(NoVoteReason.Reason.INSUFFICIENT_ASSET, null)));
+    }
+
+    // =========================================================================
+    // Helpers — option builders
+    // =========================================================================
+
+    private OptionDescription buildOptionDescription(ForeignBankId negId, String ticker,
+            BigDecimal quantity, String currencyCode, BigDecimal strikePrice) {
+        CurrencyCode ccy = CurrencyCode.valueOf(currencyCode);
+        return new OptionDescription(negId, new StockDescription(ticker),
+                new MonetaryValue(ccy, strikePrice),
+                OffsetDateTime.now().plusDays(30), quantity);
+    }
+
+    /** Balanced tx with only option postings (no companion stock/monas). */
+    private Transaction optionOnlyTx(String negIdStr, String ticker, int quantity,
+            String currencyCode, BigDecimal strikePrice) {
+        ForeignBankId negId = new ForeignBankId(MY_RN, negIdStr);
+        OptionDescription opt = buildOptionDescription(negId, ticker, BigDecimal.valueOf(quantity), currencyCode, strikePrice);
+        return new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(quantity), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-quantity), new Asset.OptionAsset(opt))
+        ), new ForeignBankId(MY_RN, "tx-opt-only"), null, null, null, null);
+    }
+
+    /**
+     * Full option exercise tx: balanced option postings + remote companion stock and monas.
+     * amount × strikePrice = required money. All companion postings are remote so they pass
+     * the local posting validation loop but are visible to the anyMatch companion check.
+     */
+    private Transaction fullOptionTx(String negIdStr, String ticker, int quantity,
+            String currencyCode, BigDecimal strikePrice) {
+        ForeignBankId negId = new ForeignBankId(MY_RN, negIdStr);
+        OptionDescription opt = buildOptionDescription(negId, ticker, BigDecimal.valueOf(quantity), currencyCode, strikePrice);
+        BigDecimal money = strikePrice.multiply(BigDecimal.valueOf(quantity));
+        CurrencyCode ccy = CurrencyCode.valueOf(currencyCode);
+        return new Transaction(List.of(
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(quantity), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Option(negId), BigDecimal.valueOf(-quantity), new Asset.OptionAsset(opt)),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "seller")), BigDecimal.valueOf(-quantity), new Asset.Stock(new StockDescription(ticker))),
+                new Posting(new TxAccount.Person(new ForeignBankId(REMOTE_RN, "buyer")), BigDecimal.valueOf(quantity), new Asset.Stock(new StockDescription(ticker))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000001"), money.negate(), new Asset.Monas(new MonetaryAsset(ccy))),
+                new Posting(new TxAccount.Account(REMOTE_RN + "000002"), money, new Asset.Monas(new MonetaryAsset(ccy)))
+        ), new ForeignBankId(MY_RN, "tx-opt-full"), null, null, null, null);
+    }
+
+    private InterbankOtcContract buildContract(InterbankOtcContractStatus status, LocalDate settlementDate,
+            String ticker, BigDecimal quantity, BigDecimal strikePrice, String strikeCurrency) {
+        InterbankOtcContract c = new InterbankOtcContract();
+        c.setStatus(status);
+        c.setSettlementDate(settlementDate);
+        c.setTicker(ticker);
+        c.setQuantity(quantity);
+        c.setStrikePrice(strikePrice);
+        c.setStrikeCurrency(strikeCurrency);
+        return c;
+    }
+
+    private void stubOptionNegAndContract(InterbankOtcContract contract) {
+        InterbankOtcNegotiation neg = new InterbankOtcNegotiation();
+        neg.setId(10L);
+        when(otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                anyInt(), any())).thenReturn(Optional.of(neg));
+        when(otcContractRepository.findBySourceNegotiationId(10L)).thenReturn(Optional.of(contract));
     }
 }

@@ -11,11 +11,15 @@ import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.model.AccountStatus;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.interbank.exception.InterbankExceptions;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContract;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcContractStatus;
+import rs.raf.banka2_bek.interbank.model.InterbankOtcNegotiation;
 import rs.raf.banka2_bek.interbank.model.InterbankTransaction;
 import rs.raf.banka2_bek.interbank.model.InterbankTransactionStatus;
 import rs.raf.banka2_bek.interbank.protocol.*;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcContractRepository;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcNegotiationRepository;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
-import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
@@ -23,6 +27,7 @@ import rs.raf.banka2_bek.stock.repository.ListingRepository;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -39,7 +44,8 @@ public class TransactionExecutorService {
     private final PortfolioRepository portfolioRepository;
     private final InterbankReservationApplier reservationApplier;
     private final ListingRepository listingRepository;
-    private final CurrencyConversionService currencyConversionService;
+    private final InterbankOtcNegotiationRepository otcNegotiationRepository;
+    private final InterbankOtcContractRepository otcContractRepository;
 
     /**
      * §2.8.5: self-proxy so that @Transactional on phase methods is respected when called
@@ -125,6 +131,8 @@ public class TransactionExecutorService {
 
         List<NoVoteReason> violations = doValidateAndReserve(tx);
         if (!violations.isEmpty()) {
+            updateTransactionStatus(tx.transactionId(), InterbankTransactionStatus.ROLLED_BACK,
+                    "Local validation failed: " + violations);
             return new Phase1Result(
                     new TransactionVote(TransactionVote.Vote.NO, violations),
                     Map.of(), Map.of());
@@ -231,24 +239,30 @@ public class TransactionExecutorService {
             boolean isDebit = p.amount().compareTo(BigDecimal.ZERO) > 0;
             BigDecimal abs = p.amount().abs();
 
-            if (p.asset() instanceof Asset.Monas m && p.account() instanceof TxAccount.Account a) {
-                Account acct = accountRepository.findForUpdateByAccountNumber(a.num())
-                        .orElseThrow(() -> new InterbankExceptions.InterbankProtocolException(
-                                "Account not found: " + a.num()));
-                String fromCcy = m.asset().currency().name();
-                String toCcy = acct.getCurrency().getCode();
-                BigDecimal converted = currencyConversionService.convert(abs, fromCcy, toCcy);
-                reservationApplier.commitMonas(a.num(), converted, isDebit);
+            if (p.asset() instanceof Asset.Monas && p.account() instanceof TxAccount.Account a) {
+                reservationApplier.commitMonas(a.num(), abs, isDebit);
 
             } else if (p.asset() instanceof Asset.Stock s && p.account() instanceof TxAccount.Person pe) {
                 Listing listing = listingRepository.findByTicker(s.asset().ticker())
                         .orElseThrow(() -> new InterbankExceptions.InterbankProtocolException(
                                 "Listing not found: " + s.asset().ticker()));
                 Long userId = Long.parseLong(pe.id().id());
-                reservationApplier.commitStock(userId, "CLIENT", listing.getId(),
+                reservationApplier.commitStock(userId, "CLIENT", listing,
                         abs.intValueExact(), isDebit);
+
+            } else if (p.asset() instanceof Asset.OptionAsset oa && p.account() instanceof TxAccount.Option) {
+                ForeignBankId negId = oa.asset().negotiationId();
+                otcNegotiationRepository
+                        .findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                                negId.routingNumber(), negId.id())
+                        .ifPresent(neg ->
+                                otcContractRepository.findBySourceNegotiationId(neg.getId())
+                                        .ifPresent(contract -> {
+                                            contract.setStatus(InterbankOtcContractStatus.EXERCISED);
+                                            contract.setExercisedAt(LocalDateTime.now());
+                                            otcContractRepository.save(contract);
+                                        }));
             }
-            // OptionAsset: no-op for T1
         }
 
         ibTx.setStatus(InterbankTransactionStatus.COMMITTED);
@@ -281,14 +295,8 @@ public class TransactionExecutorService {
 
             BigDecimal abs = p.amount().abs();
 
-            if (p.asset() instanceof Asset.Monas m && p.account() instanceof TxAccount.Account a) {
-                Account acct = accountRepository.findForUpdateByAccountNumber(a.num())
-                        .orElseThrow(() -> new InterbankExceptions.InterbankProtocolException(
-                                "Account not found: " + a.num()));
-                String fromCcy = m.asset().currency().name();
-                String toCcy = acct.getCurrency().getCode();
-                BigDecimal converted = currencyConversionService.convert(abs, fromCcy, toCcy);
-                reservationApplier.releaseMonas(a.num(), converted);
+            if (p.asset() instanceof Asset.Monas && p.account() instanceof TxAccount.Account a) {
+                reservationApplier.releaseMonas(a.num(), abs);
 
             } else if (p.asset() instanceof Asset.Stock s && p.account() instanceof TxAccount.Person pe) {
                 Listing listing = listingRepository.findByTicker(s.asset().ticker())
@@ -296,6 +304,10 @@ public class TransactionExecutorService {
                                 "Listing not found: " + s.asset().ticker()));
                 Long userId = Long.parseLong(pe.id().id());
                 reservationApplier.releaseStock(userId, "CLIENT", listing.getId(), abs.intValueExact());
+
+            } else if (p.asset() instanceof Asset.OptionAsset) {
+                // Option rollback is a no-op: stocks remain reserved under the contract;
+                // the contract stays ACTIVE so the buyer can retry.
             }
         }
 
@@ -451,6 +463,10 @@ public class TransactionExecutorService {
     }
 
     private void saveCoordinatorState(Transaction tx, InterbankTransactionStatus status) {
+        if (txRepo.findByTransactionRoutingNumberAndTransactionIdString(
+                tx.transactionId().routingNumber(), tx.transactionId().id()).isPresent()) {
+            return;
+        }
         try {
             InterbankTransaction ibt = new InterbankTransaction();
             ibt.setTransactionRoutingNumber(tx.transactionId().routingNumber());
@@ -470,6 +486,10 @@ public class TransactionExecutorService {
     }
 
     private void saveRecipientState(Transaction tx) {
+        if (txRepo.findByTransactionRoutingNumberAndTransactionIdString(
+                tx.transactionId().routingNumber(), tx.transactionId().id()).isPresent()) {
+            return;
+        }
         try {
             InterbankTransaction ibt = new InterbankTransaction();
             ibt.setTransactionRoutingNumber(tx.transactionId().routingNumber());
@@ -500,6 +520,13 @@ public class TransactionExecutorService {
                 });
     }
 
+    private static String assetKey(Asset asset) {
+        if (asset instanceof Asset.Monas m)      return "MONAS:" + m.asset().currency().name();
+        if (asset instanceof Asset.Stock s)       return "STOCK:" + s.asset().ticker();
+        if (asset instanceof Asset.OptionAsset o) return "OPTION:" + o.asset().negotiationId().id();
+        return "UNKNOWN:" + asset.getClass().getSimpleName();
+    }
+
     private boolean isPostingRemote(Posting p) {
         TxAccount account = p.account();
         if (account instanceof TxAccount.Account a) {
@@ -518,11 +545,14 @@ public class TransactionExecutorService {
      * Pass 2: make reservations only if Pass 1 found no violations.
      */
     private List<NoVoteReason> doValidateAndReserve(Transaction tx) {
-        BigDecimal sum = tx.postings().stream()
-                .map(Posting::amount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (sum.compareTo(BigDecimal.ZERO) != 0) {
-            return List.of(new NoVoteReason(NoVoteReason.Reason.UNBALANCED_TX, null));
+        Map<String, BigDecimal> assetSums = new LinkedHashMap<>();
+        for (Posting p : tx.postings()) {
+            assetSums.merge(assetKey(p.asset()), p.amount(), BigDecimal::add);
+        }
+        for (BigDecimal groupSum : assetSums.values()) {
+            if (groupSum.compareTo(BigDecimal.ZERO) != 0) {
+                return List.of(new NoVoteReason(NoVoteReason.Reason.UNBALANCED_TX, null));
+            }
         }
 
         List<NoVoteReason> violations = new ArrayList<>();
@@ -570,7 +600,7 @@ public class TransactionExecutorService {
                 if (isCredit) {
                     Listing listing = listingOpt.get();
                     Optional<Portfolio> portfolioOpt = portfolioRepository
-                            .findByUserIdAndUserRoleAndListingIdForUpdate(userId, "CLIENT", listing.getId());
+                            .findByUserIdAndUserRoleAndListingId(userId, "CLIENT", listing.getId());
                     if (portfolioOpt.isEmpty()) {
                         violations.add(new NoVoteReason(NoVoteReason.Reason.NO_SUCH_ASSET, p));
                         continue;
@@ -580,8 +610,50 @@ public class TransactionExecutorService {
                     }
                 }
 
-            } else if (asset instanceof Asset.OptionAsset) {
-                violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+            } else if (asset instanceof Asset.OptionAsset opAsset && account instanceof TxAccount.Option) {
+                OptionDescription optionDescription = opAsset.asset();
+                ForeignBankId negotiationId = optionDescription.negotiationId();
+
+                Optional<InterbankOtcNegotiation> negotiationOptional =
+                        otcNegotiationRepository.findByForeignNegotiationRoutingNumberAndForeignNegotiationIdString(
+                                negotiationId.routingNumber(), negotiationId.id());
+                if (negotiationOptional.isEmpty()) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+                    continue;
+                }
+
+                Optional<InterbankOtcContract> contractOptional =
+                        otcContractRepository.findBySourceNegotiationId(negotiationOptional.get().getId());
+                if (contractOptional.isEmpty()) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_NEGOTIATION_NOT_FOUND, p));
+                    continue;
+                }
+
+                InterbankOtcContract contract = contractOptional.get();
+
+                // §2.8.6 rule 5: option must not be used or expired
+                if (contract.getStatus() != InterbankOtcContractStatus.ACTIVE
+                        || contract.getSettlementDate().isBefore(LocalDate.now())) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_USED_OR_EXPIRED, p));
+                    continue;
+                }
+
+                // §2.8.6 rule 6: companion postings must match contract terms exactly
+                BigDecimal requiredMoney = contract.getQuantity().multiply(contract.getStrikePrice());
+
+                boolean stockOk = tx.postings().stream().anyMatch(sp ->
+                        sp.asset() instanceof Asset.Stock ss
+                        && ss.asset().ticker().equals(contract.getTicker())
+                        && sp.amount().abs().compareTo(contract.getQuantity()) == 0);
+
+                boolean moneyOk = tx.postings().stream().anyMatch(mp ->
+                        mp.asset() instanceof Asset.Monas mm
+                        && mm.asset().currency().name().equals(contract.getStrikeCurrency())
+                        && mp.amount().abs().compareTo(requiredMoney) == 0);
+
+                if (!stockOk || !moneyOk) {
+                    violations.add(new NoVoteReason(NoVoteReason.Reason.OPTION_AMOUNT_INCORRECT, p));
+                }
 
             } else {
                 violations.add(new NoVoteReason(NoVoteReason.Reason.UNACCEPTABLE_ASSET, p));
