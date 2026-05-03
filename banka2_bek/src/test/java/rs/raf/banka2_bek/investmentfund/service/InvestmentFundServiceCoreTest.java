@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.investmentFund.service;
+package rs.raf.banka2_bek.investmentfund.service;
 
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.DisplayName;

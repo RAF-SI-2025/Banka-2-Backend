@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.account.model.*;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
@@ -11,6 +12,7 @@ import rs.raf.banka2_bek.account.util.AccountNumberUtils;
 import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
 import rs.raf.banka2_bek.auth.util.UserRole;
+import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.company.model.Company;
 import rs.raf.banka2_bek.company.repository.CompanyRepository;
@@ -23,6 +25,7 @@ import rs.raf.banka2_bek.investmentfund.dto.InvestmentFundDtos.*;
 import rs.raf.banka2_bek.investmentfund.mapper.InvestmentFundMapper;
 import rs.raf.banka2_bek.investmentfund.model.*;
 import rs.raf.banka2_bek.investmentfund.repository.*;
+import rs.raf.banka2_bek.order.exception.InsufficientFundsException;
 import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
@@ -31,6 +34,7 @@ import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.util.ListingCurrencyResolver;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -101,9 +105,14 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class InvestmentFundService {
 
+    private static final String RSD = "RSD";
+    private static final BigDecimal FX_FEE_RATE = new BigDecimal("0.01");
+    private static final int MONEY_SCALE = 4;
+
     private final FundValueSnapshotRepository fundValueSnapshotRepository;
     private final InvestmentFundRepository investmentFundRepository;
     private final ClientFundPositionRepository clientFundPositionRepository;
+    private final ClientFundTransactionRepository clientFundTransactionRepository;
     private final ClientRepository clientRepository;
     private final AccountRepository accountRepository;
     private final CurrencyRepository currencyRepository;
@@ -113,6 +122,7 @@ public class InvestmentFundService {
     private final PortfolioRepository portfolioRepository;
     private final ListingRepository listingRepository;
     private final FundValueCalculator fundValueCalculator;
+    private final FundLiquidationService fundLiquidationService;
     private final CurrencyConversionService currencyConversionService;
 
     /**
@@ -207,7 +217,7 @@ public class InvestmentFundService {
             String q = searchQuery.toLowerCase();
             stream = stream.filter(f ->
                     (f.getName() != null && f.getName().toLowerCase().contains(q)) ||
-                    (f.getDescription() != null && f.getDescription().toLowerCase().contains(q)));
+                            (f.getDescription() != null && f.getDescription().toLowerCase().contains(q)));
         }
 
         List<InvestmentFundSummaryDto> result = stream.map(f -> {
@@ -346,14 +356,168 @@ public class InvestmentFundService {
         return result;
     }
 
+    /**
+     * T8 — Celina 4 (Nova), Investicioni fondovi / ClientFundInvestment.
+     *
+     * Uplata uvek zavrsava kao RSD priliv na racun fonda. Klijent moze da
+     * uplati sa svog racuna, a supervizor uplacuje u ime banke sa bankinog
+     * racuna. Banka se u ClientFundPosition modelu vodi kao poseban klijent
+     * seed-ovan preko bank.owner-client-email, sto je T12 konvencija.
+     */
     @Transactional
     public ClientFundPositionDto invest(Long fundId, InvestFundDto dto, Long userId, String userRole) {
-        throw new UnsupportedOperationException("TODO P7: implement invest — T8 task.");
+        if (dto == null || dto.getAmount() == null || dto.getAmount().signum() <= 0) {
+            throw new IllegalArgumentException("Iznos uplate mora biti pozitivan.");
+        }
+
+        InvestmentFund fund = findActiveFund(fundId);
+        Account sourceAccount = accountRepository.findForUpdateById(dto.getSourceAccountId())
+                .orElseThrow(() -> new EntityNotFoundException("Izvorni racun ne postoji: " + dto.getSourceAccountId()));
+        Account fundAccount = accountRepository.findForUpdateById(fund.getAccountId())
+                .orElseThrow(() -> new EntityNotFoundException("Racun fonda ne postoji: " + fund.getAccountId()));
+
+        if (Objects.equals(sourceAccount.getId(), fundAccount.getId())) {
+            throw new IllegalArgumentException("Izvorni racun ne moze biti isti kao racun fonda.");
+        }
+
+        String actorRole = normalizeUserRole(userRole);
+        ensureAccountCanBeUsed(sourceAccount, userId, actorRole, "uplate");
+        InvestorIdentity investor = resolveInvestorIdentity(userId, actorRole);
+
+        InvestmentAmounts amounts = calculateInvestmentAmounts(dto, sourceAccount, actorRole);
+        if (amounts.amountRsd().compareTo(nullToZero(fund.getMinimumContribution())) < 0) {
+            throw new IllegalArgumentException("Iznos uplate mora biti najmanje "
+                    + fund.getMinimumContribution() + " RSD.");
+        }
+
+        BigDecimal totalDebit = amounts.debitAmount().add(amounts.fxCommission()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        if (nullToZero(sourceAccount.getAvailableBalance()).compareTo(totalDebit) < 0) {
+            throw new InsufficientFundsException("Nedovoljno sredstava na racunu "
+                    + sourceAccount.getAccountNumber() + ". Potrebno: " + totalDebit + " "
+                    + sourceAccount.getCurrency().getCode());
+        }
+
+        ClientFundTransaction tx = new ClientFundTransaction();
+        tx.setFundId(fund.getId());
+        tx.setUserId(investor.userId());
+        tx.setUserRole(investor.userRole());
+        tx.setAmountRsd(amounts.amountRsd());
+        tx.setSourceAccountId(sourceAccount.getId());
+        tx.setInflow(true);
+        tx.setStatus(ClientFundTransactionStatus.PENDING);
+        tx.setCreatedAt(LocalDateTime.now());
+        tx = clientFundTransactionRepository.save(tx);
+
+        debit(sourceAccount, totalDebit);
+        credit(fundAccount, amounts.amountRsd());
+        creditBankFxCommission(sourceAccount.getCurrency().getCode(), amounts.fxCommission(), sourceAccount.getId());
+
+        tx.setStatus(ClientFundTransactionStatus.COMPLETED);
+        tx.setCompletedAt(LocalDateTime.now());
+        clientFundTransactionRepository.save(tx);
+
+        ClientFundPosition position = upsertPosition(fund.getId(), investor, amounts.amountRsd());
+        log.info("T8 invest completed: fund={}, investor={}#{}, amountRsd={}, sourceAccount={}",
+                fund.getId(), investor.userRole(), investor.userId(), amounts.amountRsd(), sourceAccount.getId());
+        return toClientFundPositionDto(position, fund.getName());
     }
 
+    /**
+     * T8 — Celina 4 (Nova), ClientFundRedemption.
+     *
+     * Isplata se evidentira kao RSD odliv iz fonda. Ako fond ima dovoljno
+     * raspolozivog cash-a, novac se isplacuje odmah. Ako nema, transakcija
+     * ostaje PENDING i poziva se T9 FundLiquidationService da proda hartije
+     * fonda i kasnije kroz onFillCompleted FIFO razresi pending isplate.
+     */
     @Transactional
     public ClientFundTransactionDto withdraw(Long fundId, WithdrawFundDto dto, Long userId, String userRole) {
-        throw new UnsupportedOperationException("TODO P7+P4: implement withdraw — T8 task.");
+        if (dto == null) {
+            throw new IllegalArgumentException("Podaci za isplatu su obavezni.");
+        }
+
+        InvestmentFund fund = findActiveFund(fundId);
+        Account fundAccount = accountRepository.findForUpdateById(fund.getAccountId())
+                .orElseThrow(() -> new EntityNotFoundException("Racun fonda ne postoji: " + fund.getAccountId()));
+        Account destinationAccount = accountRepository.findForUpdateById(dto.getDestinationAccountId())
+                .orElseThrow(() -> new EntityNotFoundException("Racun za isplatu ne postoji: " + dto.getDestinationAccountId()));
+
+        if (Objects.equals(destinationAccount.getId(), fundAccount.getId())) {
+            throw new IllegalArgumentException("Racun za isplatu ne moze biti isti kao racun fonda.");
+        }
+
+        String actorRole = normalizeUserRole(userRole);
+        ensureAccountCanBeUsed(destinationAccount, userId, actorRole, "isplate");
+        InvestorIdentity investor = resolveInvestorIdentity(userId, actorRole);
+
+        ClientFundPosition position = clientFundPositionRepository
+                .findByFundIdAndUserIdAndUserRole(fund.getId(), investor.userId(), investor.userRole())
+                .orElseThrow(() -> new IllegalArgumentException("Nemate poziciju u fondu " + fund.getName() + "."));
+
+        BigDecimal amountRsd = dto.getAmount() == null
+                ? nullToZero(position.getTotalInvested())
+                : dto.getAmount().setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        if (amountRsd.signum() <= 0) {
+            throw new IllegalArgumentException("Iznos isplate mora biti pozitivan.");
+        }
+        if (nullToZero(position.getTotalInvested()).compareTo(amountRsd) < 0) {
+            throw new IllegalArgumentException("Trazeni iznos je veci od pozicije u fondu.");
+        }
+
+        ClientFundTransaction tx = new ClientFundTransaction();
+        tx.setFundId(fund.getId());
+        tx.setUserId(investor.userId());
+        tx.setUserRole(investor.userRole());
+        tx.setAmountRsd(amountRsd);
+        tx.setSourceAccountId(destinationAccount.getId());
+        tx.setInflow(false);
+        tx.setStatus(ClientFundTransactionStatus.PENDING);
+        tx.setCreatedAt(LocalDateTime.now());
+        tx = clientFundTransactionRepository.save(tx);
+
+        decreasePosition(position, amountRsd);
+
+        BigDecimal availableCash = nullToZero(fundAccount.getAvailableBalance());
+        if (availableCash.compareTo(amountRsd) >= 0) {
+            executePayout(tx, fundAccount, destinationAccount, actorRole);
+            tx = clientFundTransactionRepository.save(tx);
+            log.info("T8 withdraw completed immediately: fund={}, investor={}#{}, amountRsd={}",
+                    fund.getId(), investor.userRole(), investor.userId(), amountRsd);
+        } else {
+            BigDecimal shortfall = amountRsd.subtract(availableCash).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+            tx.setFailureReason("Nedovoljno likvidnih sredstava; pokrenuta automatska likvidacija hartija.");
+            tx = clientFundTransactionRepository.save(tx);
+            sendPushNotification(investor.userId(), "Isplata iz fonda " + fund.getName()
+                    + " je primljena i bice zavrsena nakon automatske likvidacije hartija.");
+            fundLiquidationService.liquidateFor(fund.getId(), shortfall);
+            log.info("T8 withdraw pending: fund={}, investor={}#{}, amountRsd={}, shortfall={}",
+                    fund.getId(), investor.userRole(), investor.userId(), amountRsd, shortfall);
+        }
+
+        return toClientFundTransactionDto(tx, fund.getName());
+    }
+
+    public List<ClientFundTransactionDto> listTransactions(Long fundId, Long requesterId, String requesterRole) {
+        InvestmentFund fund = investmentFundRepository.findById(fundId)
+                .orElseThrow(() -> new EntityNotFoundException("Fund #" + fundId + " not found."));
+        String role = normalizeUserRole(requesterRole);
+        List<ClientFundTransaction> transactions = clientFundTransactionRepository.findByFundIdOrderByCreatedAtDesc(fundId);
+
+        if (isEmployeeActor(role)) {
+            ensureSupervisor(requesterId);
+            return transactions.stream()
+                    .map(tx -> toClientFundTransactionDto(tx, fund.getName()))
+                    .toList();
+        }
+
+        if (UserRole.isClient(role)) {
+            return transactions.stream()
+                    .filter(tx -> Objects.equals(tx.getUserId(), requesterId) && UserRole.CLIENT.equals(tx.getUserRole()))
+                    .map(tx -> toClientFundTransactionDto(tx, fund.getName()))
+                    .toList();
+        }
+
+        throw new AccessDeniedException("Nemate pravo pregleda transakcija fonda.");
     }
 
     /**
@@ -416,7 +580,7 @@ public class InvestmentFundService {
             // Banka klijent nije seed-ovan — graceful fallback (Profit Banke
             // FE prikazuje "Banka nema pozicije" placeholder umesto greske).
             log.warn("Bank owner client (email={}) not found — returning empty bank positions list. "
-                    + "Add seed entry or set bank.owner-client-email to a valid client.",
+                            + "Add seed entry or set bank.owner-client-email to a valid client.",
                     bankOwnerClientEmail);
             return List.of();
         }
@@ -450,6 +614,239 @@ public class InvestmentFundService {
         dto.setLastModifiedAt(position.getLastModifiedAt());
         return dto;
     }
+
+    private InvestmentFund findActiveFund(Long fundId) {
+        InvestmentFund fund = investmentFundRepository.findById(fundId)
+                .orElseThrow(() -> new EntityNotFoundException("Fund #" + fundId + " not found."));
+        if (!fund.isActive()) {
+            throw new IllegalStateException("Fond " + fund.getName() + " nije aktivan.");
+        }
+        return fund;
+    }
+
+    private InvestmentAmounts calculateInvestmentAmounts(InvestFundDto dto, Account sourceAccount, String actorRole) {
+        String sourceCurrency = sourceAccount.getCurrency().getCode().toUpperCase(Locale.ROOT);
+        String requestedCurrency = normalizeCurrency(dto.getCurrency(), sourceCurrency);
+        BigDecimal inputAmount = dto.getAmount().setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        boolean chargeFx = UserRole.isClient(actorRole) && !RSD.equals(sourceCurrency);
+
+        if (RSD.equals(requestedCurrency)) {
+            BigDecimal debitAmount;
+            BigDecimal commission;
+            if (RSD.equals(sourceCurrency)) {
+                debitAmount = inputAmount;
+                commission = BigDecimal.ZERO;
+            } else {
+                CurrencyConversionService.ConversionResult conversion = currencyConversionService
+                        .convertForPurchase(inputAmount, RSD, sourceCurrency, chargeFx);
+                debitAmount = conversion.amount();
+                commission = conversion.commission();
+            }
+            return new InvestmentAmounts(inputAmount, debitAmount, commission);
+        }
+
+        if (requestedCurrency.equals(sourceCurrency)) {
+            BigDecimal amountRsd = currencyConversionService.convert(inputAmount, sourceCurrency, RSD);
+            BigDecimal commission = chargeFx
+                    ? inputAmount.multiply(FX_FEE_RATE).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            return new InvestmentAmounts(amountRsd, inputAmount, commission);
+        }
+
+        throw new IllegalArgumentException("Valuta uplate mora biti RSD ili valuta izvornog racuna ("
+                + sourceCurrency + ").");
+    }
+
+    private void executePayout(ClientFundTransaction tx, Account fundAccount, Account destinationAccount, String actorRole) {
+        BigDecimal amountRsd = tx.getAmountRsd().setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        if (nullToZero(fundAccount.getAvailableBalance()).compareTo(amountRsd) < 0) {
+            throw new InsufficientFundsException("Fond nema dovoljno likvidnih RSD sredstava za isplatu.");
+        }
+
+        debit(fundAccount, amountRsd);
+
+        String destinationCurrency = destinationAccount.getCurrency().getCode().toUpperCase(Locale.ROOT);
+        BigDecimal grossCredit = RSD.equals(destinationCurrency)
+                ? amountRsd
+                : currencyConversionService.convert(amountRsd, RSD, destinationCurrency);
+        BigDecimal fxFee = (!RSD.equals(destinationCurrency) && UserRole.isClient(actorRole))
+                ? grossCredit.multiply(FX_FEE_RATE).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        BigDecimal netCredit = grossCredit.subtract(fxFee).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+
+        credit(destinationAccount, netCredit);
+        creditBankFxCommission(destinationCurrency, fxFee, destinationAccount.getId());
+
+        tx.setStatus(ClientFundTransactionStatus.COMPLETED);
+        tx.setCompletedAt(LocalDateTime.now());
+        tx.setFailureReason(null);
+    }
+
+    private ClientFundPosition upsertPosition(Long fundId, InvestorIdentity investor, BigDecimal amountRsd) {
+        ClientFundPosition position = clientFundPositionRepository
+                .findByFundIdAndUserIdAndUserRole(fundId, investor.userId(), investor.userRole())
+                .orElseGet(() -> {
+                    ClientFundPosition p = new ClientFundPosition();
+                    p.setFundId(fundId);
+                    p.setUserId(investor.userId());
+                    p.setUserRole(investor.userRole());
+                    p.setTotalInvested(BigDecimal.ZERO);
+                    return p;
+                });
+        position.setTotalInvested(nullToZero(position.getTotalInvested()).add(amountRsd).setScale(MONEY_SCALE, RoundingMode.HALF_UP));
+        position.setLastModifiedAt(LocalDateTime.now());
+        return clientFundPositionRepository.save(position);
+    }
+
+    private void decreasePosition(ClientFundPosition position, BigDecimal amountRsd) {
+        BigDecimal remaining = nullToZero(position.getTotalInvested()).subtract(amountRsd)
+                .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        if (remaining.signum() <= 0) {
+            clientFundPositionRepository.delete(position);
+            return;
+        }
+        position.setTotalInvested(remaining);
+        position.setLastModifiedAt(LocalDateTime.now());
+        clientFundPositionRepository.save(position);
+    }
+
+    private void ensureAccountCanBeUsed(Account account, Long actorId, String actorRole, String operationName) {
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new IllegalArgumentException("Racun " + account.getAccountNumber() + " nije aktivan.");
+        }
+        if (UserRole.isClient(actorRole)) {
+            if (account.getClient() == null || !Objects.equals(account.getClient().getId(), actorId)) {
+                throw new AccessDeniedException("Racun " + account.getAccountNumber()
+                        + " ne pripada ulogovanom klijentu.");
+            }
+            return;
+        }
+        if (isEmployeeActor(actorRole)) {
+            ensureSupervisor(actorId);
+            if (account.getCompany() == null || account.getAccountCategory() != AccountCategory.BANK_TRADING) {
+                throw new AccessDeniedException("Supervizor za " + operationName
+                        + " u ime banke mora izabrati bankin trading racun.");
+            }
+            return;
+        }
+        throw new AccessDeniedException("Nepodrzana uloga za operaciju fonda: " + actorRole);
+    }
+
+    private InvestorIdentity resolveInvestorIdentity(Long actorId, String actorRole) {
+        if (UserRole.isClient(actorRole)) {
+            clientRepository.findById(actorId)
+                    .orElseThrow(() -> new EntityNotFoundException("Klijent ne postoji: " + actorId));
+            return new InvestorIdentity(actorId, UserRole.CLIENT);
+        }
+        if (isEmployeeActor(actorRole)) {
+            ensureSupervisor(actorId);
+            Long bankClientId = resolveBankOwnerClientId();
+            return new InvestorIdentity(bankClientId, UserRole.CLIENT);
+        }
+        throw new AccessDeniedException("Nepodrzana uloga za investicione fondove: " + actorRole);
+    }
+
+    private Long resolveBankOwnerClientId() {
+        Client bankClient = clientRepository.findByEmail(bankOwnerClientEmail)
+                .orElseThrow(() -> new IllegalStateException("Banka kao klijent nije seed-ovana: " + bankOwnerClientEmail));
+        return bankClient.getId();
+    }
+
+    private void ensureSupervisor(Long employeeId) {
+        actuaryInfoRepository.findByEmployeeId(employeeId)
+                .filter(a -> a.getActuaryType() == ActuaryType.SUPERVISOR)
+                .orElseThrow(() -> new AccessDeniedException("Samo supervizor moze da ulaze/povlaci novac u ime banke."));
+    }
+
+    private void debit(Account account, BigDecimal amount) {
+        BigDecimal scaled = amount.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        account.setBalance(nullToZero(account.getBalance()).subtract(scaled));
+        account.setAvailableBalance(nullToZero(account.getAvailableBalance()).subtract(scaled));
+        accountRepository.save(account);
+    }
+
+    private void credit(Account account, BigDecimal amount) {
+        BigDecimal scaled = amount.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        account.setBalance(nullToZero(account.getBalance()).add(scaled));
+        account.setAvailableBalance(nullToZero(account.getAvailableBalance()).add(scaled));
+        accountRepository.save(account);
+    }
+
+    private void creditBankFxCommission(String currencyCode, BigDecimal commission, Long accountToSkipId) {
+        if (commission == null || commission.signum() <= 0) {
+            return;
+        }
+        Account bankAccount = accountRepository.findFirstByAccountCategoryAndCurrency_Code(
+                        AccountCategory.BANK_TRADING, currencyCode)
+                .orElseThrow(() -> new IllegalStateException("Bankin racun za FX proviziju ne postoji u valuti " + currencyCode));
+        if (Objects.equals(bankAccount.getId(), accountToSkipId)) {
+            return;
+        }
+        credit(bankAccount, commission);
+    }
+
+    private String normalizeUserRole(String userRole) {
+        if (userRole == null || userRole.isBlank()) {
+            throw new AccessDeniedException("Uloga korisnika nije poznata.");
+        }
+        String role = userRole.toUpperCase(Locale.ROOT);
+        if (role.startsWith("ROLE_")) {
+            role = role.substring("ROLE_".length());
+        }
+        if (UserRole.ADMIN.equals(role) || UserRole.SUPERVISOR.equals(role)) {
+            return UserRole.EMPLOYEE;
+        }
+        return role;
+    }
+
+    private boolean isEmployeeActor(String role) {
+        return UserRole.isEmployee(role) || UserRole.isAdmin(role) || UserRole.SUPERVISOR.equals(role);
+    }
+
+    private String normalizeCurrency(String currency, String fallback) {
+        return (currency == null || currency.isBlank() ? fallback : currency).toUpperCase(Locale.ROOT);
+    }
+
+    private BigDecimal nullToZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private ClientFundTransactionDto toClientFundTransactionDto(ClientFundTransaction tx, String fundName) {
+        Account account = tx.getSourceAccountId() == null ? null
+                : accountRepository.findById(tx.getSourceAccountId()).orElse(null);
+        return new ClientFundTransactionDto(
+                tx.getId(),
+                tx.getFundId(),
+                fundName,
+                tx.getUserId(),
+                resolveDisplayName(tx.getUserId(), tx.getUserRole()),
+                tx.getAmountRsd(),
+                account != null ? account.getAccountNumber() : null,
+                tx.isInflow(),
+                tx.getStatus() != null ? tx.getStatus().name() : null,
+                tx.getCreatedAt(),
+                tx.getCompletedAt(),
+                tx.getFailureReason());
+    }
+
+    private String resolveDisplayName(Long userId, String userRole) {
+        if (UserRole.isClient(userRole)) {
+            return clientRepository.findById(userId)
+                    .map(c -> c.getFirstName() + " " + c.getLastName())
+                    .orElse("Klijent #" + userId);
+        }
+        return employeeRepository.findById(userId)
+                .map(e -> e.getFirstName() + " " + e.getLastName())
+                .orElse("Zaposleni #" + userId);
+    }
+
+    private void sendPushNotification(Long userId, String message) {
+        log.info("[PUSH NOTIFICATION] userId={}: {}", userId, message);
+    }
+
+    private record InvestorIdentity(Long userId, String userRole) {}
+
+    private record InvestmentAmounts(BigDecimal amountRsd, BigDecimal debitAmount, BigDecimal fxCommission) {}
 
     @Transactional
     public int reassignFundManager(Long oldSupervisorId, Long newAdminId) {

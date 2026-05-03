@@ -253,7 +253,7 @@ public class OrderExecutionService {
                 .multiply(contractSize)
                 .setScale(4, RoundingMode.HALF_UP);
 
-        boolean isEmployee = UserRole.isEmployee(order.getUserRole());
+        boolean isEmployee = UserRole.isEmployee(order.getUserRole()) || UserRole.FUND.equals(order.getUserRole());
         BigDecimal commissionInListing = isEmployee
                 ? BigDecimal.ZERO
                 : calculateCommission(totalPriceInListing, order.getOrderType());
