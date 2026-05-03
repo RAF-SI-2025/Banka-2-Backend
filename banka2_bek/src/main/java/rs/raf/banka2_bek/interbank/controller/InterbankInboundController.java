@@ -79,36 +79,61 @@ public class InterbankInboundController {
     @PostMapping
     public ResponseEntity<Object> receiveMessage(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
-            @RequestBody String rawBody) throws Exception {
+            @RequestBody String rawBody) {
 
-        if (apiKey == null || apiKey.isBlank()) return ResponseEntity.status(401).build();
+        try {
+            if (apiKey == null || apiKey.isBlank()) {
+                return ResponseEntity.status(401).build();
+            }
 
-        Optional<InterbankProperties.PartnerBank> partnerBankOpt = properties.getPartners()
-                .stream()
-                .filter(partner -> partner.getInboundToken().equals(apiKey))
-                .findFirst();
+            Optional<InterbankProperties.PartnerBank> partnerBankOpt = properties.getPartners()
+                    .stream()
+                    .filter(partner -> apiKey.equals(partner.getInboundToken()))
+                    .findFirst();
 
-        if (partnerBankOpt.isEmpty()) return ResponseEntity.status(401).build();
+            if (partnerBankOpt.isEmpty()) {
+                return ResponseEntity.status(401).build();
+            }
 
-        InterbankProperties.PartnerBank partnerBank = partnerBankOpt.get();
+            InterbankProperties.PartnerBank partnerBank = partnerBankOpt.get();
 
-        JsonNode envelope = objectMapper.readTree(rawBody);
-        IdempotenceKey idempotenceKey = objectMapper.convertValue(envelope.get("idempotenceKey"), IdempotenceKey.class);
-        MessageType messageType = objectMapper.convertValue(envelope.get("messageType"), MessageType.class);
-        JsonNode messageNode = envelope.get("message");
+            JsonNode envelope = objectMapper.readTree(rawBody);
 
-        if (idempotenceKey.routingNumber() != partnerBank.getRoutingNumber())
-            return ResponseEntity.status(401).build();
+            if (!envelope.hasNonNull("idempotenceKey")
+                    || !envelope.hasNonNull("messageType")
+                    || !envelope.hasNonNull("message")) {
+                return ResponseEntity.badRequest().build();
+            }
 
-        Optional<String> cashedOpt = interbankMessageService.findCachedResponse(idempotenceKey);
-        if (cashedOpt.isEmpty())
+            IdempotenceKey idempotenceKey =
+                    objectMapper.convertValue(envelope.get("idempotenceKey"), IdempotenceKey.class);
+            MessageType messageType =
+                    objectMapper.convertValue(envelope.get("messageType"), MessageType.class);
+            JsonNode messageNode = envelope.get("message");
+
+            if (idempotenceKey.routingNumber() != partnerBank.getRoutingNumber()) {
+                return ResponseEntity.status(401).build();
+            }
+
+            Optional<String> cachedResponseOpt = interbankMessageService.findCachedResponse(idempotenceKey);
+
+            if (cachedResponseOpt.isPresent()) {
+                String cachedResponse = cachedResponseOpt.get();
+
+                if (cachedResponse == null || cachedResponse.isBlank()) {
+                    return ResponseEntity.noContent().build();
+                }
+
+                return ResponseEntity.ok(objectMapper.readTree(cachedResponse));
+            }
+
             return dispatchByMessageType(messageType, idempotenceKey, messageNode);
 
-        if (!cashedOpt.get().isBlank())
-            return ResponseEntity.ok(objectMapper.readTree(cashedOpt.get()));
-
-        return ResponseEntity.noContent().build();
-
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
     }
 
     private ResponseEntity<Object> dispatchByMessageType(
