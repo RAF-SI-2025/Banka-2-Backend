@@ -60,7 +60,7 @@ class InvestmentFundServiceIntegrationTest {
                 .registrationNumber("22200022")
                 .taxNumber("100000001")
                 .address("Bulevar Kralja Aleksandra 1, Beograd")
-                .isState(true)
+                .isBank(true)
                 .build();
         companyRepository.save(bank);
 

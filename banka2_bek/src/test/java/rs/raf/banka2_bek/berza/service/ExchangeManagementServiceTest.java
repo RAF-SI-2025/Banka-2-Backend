@@ -356,4 +356,76 @@ class ExchangeManagementServiceTest {
 
         assertFalse(service.isAfterHours("BAD"));
     }
+
+    // -------------------------------------------------------------------
+    // Opciono.3 — isWithinPostCloseWindow (spec Celina 3 §404 4h prozor)
+    // -------------------------------------------------------------------
+
+    @Test
+    void isWithinPostCloseWindow_4hWindow_atOnePastClose_returnsTrue() {
+        Exchange ex = nyseNormalHours(); // close 16:00, bez postMarketCloseTime
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 30, 17, 0, 0, 0, NY))
+                .when(service).nowInExchangeZone(any());
+
+        assertTrue(service.isWithinPostCloseWindow("NYSE", 4));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_4hWindow_atFourHoursAfterClose_returnsFalse() {
+        Exchange ex = nyseNormalHours(); // close 16:00
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 30, 20, 0, 0, 0, NY))
+                .when(service).nowInExchangeZone(any());
+
+        assertFalse(service.isWithinPostCloseWindow("NYSE", 4));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_4hWindow_atRegularSession_returnsFalse() {
+        Exchange ex = nyseNormalHours();
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 30, 12, 0, 0, 0, NY))
+                .when(service).nowInExchangeZone(any());
+
+        assertFalse(service.isWithinPostCloseWindow("NYSE", 4));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_4hWindow_onWeekend_returnsFalse() {
+        Exchange ex = nyseNormalHours();
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 28, 18, 0, 0, 0, NY)) // Saturday
+                .when(service).nowInExchangeZone(any());
+
+        assertFalse(service.isWithinPostCloseWindow("NYSE", 4));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_zeroHours_alwaysFalse() {
+        // Bez stub-a — kratko-spojeni return za hours <= 0 ne dotice repo
+        assertFalse(service.isWithinPostCloseWindow("NYSE", 0));
+        assertFalse(service.isWithinPostCloseWindow("NYSE", -1));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_2hWindow_atTwoPastClose_returnsFalse() {
+        Exchange ex = nyseNormalHours(); // close 16:00
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 30, 18, 0, 0, 0, NY))
+                .when(service).nowInExchangeZone(any());
+
+        // 2h prozor (16:00-18:00) — u 18:00 je vec van prozora
+        assertFalse(service.isWithinPostCloseWindow("NYSE", 2));
+    }
+
+    @Test
+    void isWithinPostCloseWindow_2hWindow_atOneHourPastClose_returnsTrue() {
+        Exchange ex = nyseNormalHours(); // close 16:00
+        when(exchangeRepository.findByAcronym("NYSE")).thenReturn(Optional.of(ex));
+        doReturn(ZonedDateTime.of(2026, 3, 30, 17, 0, 0, 0, NY))
+                .when(service).nowInExchangeZone(any());
+
+        assertTrue(service.isWithinPostCloseWindow("NYSE", 2));
+    }
 }

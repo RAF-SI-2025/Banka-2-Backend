@@ -108,6 +108,11 @@ public class ExchangeManagementService {
      * Proverava da li je berza u after-hours periodu (posle regularnog closeTime, do postMarketCloseTime).
      * Bez postMarketCloseTime nema after-hours prozora. Vikend i praznici: uvek false.
      * Test mode ne menja after-hours proveru (može biti i true i false po satu).
+     *
+     * Spec Celina 3 §404 trazi 4h prozor; za nase 6 berzi seedovani
+     * postMarketCloseTime je vec close+4h (NYSE 16:00→20:00, LSE 16:30→20:30,
+     * BELEX 15:00→19:00, ...). Za striktnu spec-only proveru bez oslonca na
+     * postMarketCloseTime, koristi {@link #isWithinPostCloseWindow(String, int)}.
      */
     public boolean isAfterHours(String acronym) {
         Exchange exchange = exchangeRepository.findByAcronym(acronym)
@@ -126,6 +131,39 @@ public class ExchangeManagementService {
             return false;
         }
         return now.isAfter(close) && now.isBefore(postEnd);
+    }
+
+    /**
+     * Opciono.3 — generalizovana spec-konformna provera: trenutno vreme
+     * u prozoru {@code (closeTime, closeTime + hours)} bez oslonca na
+     * exchange.postMarketCloseTime. Spec Celina 3 §404 trazi 4h prozor.
+     *
+     * Vikend/praznici: uvek false. Test mode ne menja.
+     *
+     * @param acronym  exchange skracenica (NYSE, NASDAQ, ...)
+     * @param hours    duzina prozora u satima (>= 1)
+     */
+    public boolean isWithinPostCloseWindow(String acronym, int hours) {
+        if (hours <= 0) return false;
+        Exchange exchange = exchangeRepository.findByAcronym(acronym)
+                .orElseThrow(() -> new RuntimeException("Exchange not found: " + acronym));
+        LocalTime close = exchange.getCloseTime();
+        if (close == null) return false;
+
+        ZonedDateTime nowZ = nowInExchangeZone(exchange);
+        if (isNonTradingDay(nowZ, exchange)) return false;
+
+        LocalTime now = nowZ.toLocalTime();
+        LocalTime windowEnd = close.plusHours(hours);
+
+        // Cross-midnight handling: ako close+hours wrap-uje preko ponoci
+        // (sto za nase 6 berzi nije slucaj), tretiramo kao ne-after-hours
+        // posle ponoci radi pojednostavljenja.
+        if (windowEnd.isBefore(close)) {
+            return now.isAfter(close);
+        }
+
+        return now.isAfter(close) && now.isBefore(windowEnd);
     }
 
     /**

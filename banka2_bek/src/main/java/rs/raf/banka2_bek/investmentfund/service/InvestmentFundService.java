@@ -41,65 +41,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/*
-================================================================================
- TODO — CORE SERVICE ZA INVESTICIONE FONDOVE
- Zaduzen: BE tim
- Spec referenca: Celina 4, linije 160-351
---------------------------------------------------------------------------------
- API:
-  1. createFund(CreateFundDto, Long supervisorId)
-     - Validacija: supervizor (po permisiji); name unique
-     - Kreiraj RSD bankin racun (AccountService.createFundAccount)
-     - Upise InvestmentFund sa managerEmployeeId=supervisorId, accountId=novi
-     - Inicijalni FundValueSnapshot sa vrednoscu=0
-     - Vrati InvestmentFundDetailDto
-
-  2. listDiscovery(String searchQuery, String sortField, String sortDirection)
-     - Vraca sve aktivne fondove + računa fundValue/profit za svaki
-     - Sortiranje/filter kako spec zahteva (Celina 4 linija 302)
-
-  3. getFundDetails(Long fundId)
-     - fundValue = account.balance + sum(portfolio.quantity * listing.price konvertovano u RSD)
-     - profit = fundValue - sum(positions.totalInvested)
-     - Holdings iz Portfolio sa userRole=FUND, userId=fundId
-     - Performance iz FundValueSnapshot (poslednjih 30 dana default)
-
-  4. invest(Long fundId, InvestFundDto dto, Long userId, String userRole)
-     - Validacija: amount >= fund.minimumContribution
-     - Ako klijent: FX komisija 1% ako konverzija; ako supervizor (banka): 0%
-     - Transfer sa sourceAccountId na fund.accountId
-     - Kreiraj ClientFundTransaction sa status=PENDING, potom COMPLETED
-     - Upsert ClientFundPosition (ili kreiraj novu)
-     - Vrati ClientFundPositionDto
-
-  5. withdraw(Long fundId, WithdrawFundDto dto, Long userId, String userRole)
-     - Ako amount null: povuci punu poziciju
-     - Validacija: position.totalInvested >= amount
-     - Ako fund.account.balance >= amount: odmah isplata
-     - Ako fund.account.balance < amount: scheduler ce prodati hartije,
-       ostaje status=PENDING, klijent dobija notifikaciju
-     - Kreiraj ClientFundTransaction
-     - Smanji position.totalInvested, ako <=0 obrisi ili active=false
-     - Vrati ClientFundTransactionDto
-
-  6. listMyPositions(Long userId, String userRole)
-     - Vrati ClientFundPositionDto za svaku poziciju koju ima taj korisnik
-     - Ukljucuje derived fields (currentValue, percentOfFund, profit)
-
-  7. reassignFundManager(Long oldSupervisorId, Long newAdminId)
-     - Poziva se iz ActuaryService.removeIsSupervisorPermission
-     - InvestmentFundRepository.reassignManager(oldId, newId)
-     - Audit log: "Fund X reassigned from supervisor A to admin B"
-
- KORISTI:
-  FundValueCalculator (za derived vrednosti)
-  FundLiquidationService (za auto-sell kad je likvidnost nedovoljna)
-  CurrencyConversionService (za konverziju u RSD)
-  AccountRepository, PortfolioRepository, ListingRepository
-  ClientFundPositionRepository, ClientFundTransactionRepository
-================================================================================
-*/
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -153,7 +94,10 @@ public class InvestmentFundService {
         Currency rsd = currencyRepository.findByCode("RSD")
                 .orElseThrow(() -> new IllegalStateException("RSD currency not found."));
 
-        Company bankCompany = companyRepository.findByIsStateTrue()
+        // Fond accountu pripada NASOJ banci (is_bank=true), ne drzavi
+        // (is_state=true) — Celina 2 §73-78 razdvaja banku od drzave.
+        Company bankCompany = companyRepository.findByIsBankTrue()
+                .or(companyRepository::findByIsStateTrue) // backward-compat dok seed/testovi ne postave is_bank
                 .orElseThrow(() -> new IllegalStateException("Bank company not found."));
 
         String accountNumber;
@@ -937,6 +881,56 @@ public class InvestmentFundService {
                     reassigned, oldSupervisorId, newAdminId);
         }
         return reassigned;
+    }
+
+    /**
+     * Ad-hoc prebacivanje vlasnistva pojedinacnog fonda na drugog supervizora.
+     * Razlikuje se od bulk {@link #reassignFundManager(Long, Long)} po tome sto
+     * koristi konkretan {@code fundId} umesto da prebaci sve fondove starog
+     * managera. Pozivac (admin) moze ovo da uradi i kada stari manager jos uvek
+     * ima isSupervisor permisiju (rucna intervencija).
+     *
+     * Validacije:
+     * - fond mora postojati ({@link EntityNotFoundException} inace)
+     * - novi manager mora postojati i biti supervizor ({@link IllegalArgumentException})
+     * - novi manager mora biti razlicit od trenutnog (no-op vraca prethodno stanje)
+     *
+     * @return azurirani fund detail
+     */
+    @Transactional
+    public InvestmentFundDetailDto reassignSingleFundManager(Long fundId, Long newManagerEmployeeId) {
+        if (fundId == null) {
+            throw new IllegalArgumentException("Fund id must not be null");
+        }
+        if (newManagerEmployeeId == null) {
+            throw new IllegalArgumentException("New manager employee id must not be null");
+        }
+
+        InvestmentFund fund = investmentFundRepository.findById(fundId)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Investment fund #" + fundId + " not found"));
+
+        // novi manager mora biti aktivan supervizor (Celina 4 §324)
+        actuaryInfoRepository.findByEmployeeId(newManagerEmployeeId)
+                .filter(a -> a.getActuaryType() == ActuaryType.SUPERVISOR)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Employee #" + newManagerEmployeeId + " is not a supervisor; "
+                                + "fund manager must be a supervisor."));
+
+        Long oldManagerId = fund.getManagerEmployeeId();
+        if (newManagerEmployeeId.equals(oldManagerId)) {
+            log.info("reassignSingleFundManager no-op: fund #{} already managed by employee #{}",
+                    fundId, newManagerEmployeeId);
+            return getFundDetails(fundId);
+        }
+
+        fund.setManagerEmployeeId(newManagerEmployeeId);
+        investmentFundRepository.save(fund);
+
+        log.info("InvestmentFund #{} manager reassigned from employee #{} to employee #{} (single-fund)",
+                fundId, oldManagerId, newManagerEmployeeId);
+
+        return getFundDetails(fundId);
     }
 
     private Comparator<InvestmentFundSummaryDto> buildComparator(String sortField) {

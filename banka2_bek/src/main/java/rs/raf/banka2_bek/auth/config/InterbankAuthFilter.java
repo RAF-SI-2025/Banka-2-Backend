@@ -22,10 +22,22 @@ import java.util.Optional;
 public class InterbankAuthFilter extends OncePerRequestFilter {
 
     private final InterbankProperties props;
+
+    /**
+     * Putanje koje protokol §3 rezervise za inter-bank pozive (zahtevaju X-Api-Key).
+     * Pored generic /interbank ulaza za 2PC (§2.11), tu su i §3 OTC negotiation rute.
+     */
+    private static boolean isInterbankPath(String uri) {
+        return uri.startsWith("/interbank")
+                || uri.startsWith("/public-stock")
+                || uri.startsWith("/negotiations")
+                || uri.startsWith("/user/");
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
 
-        if (!request.getRequestURI().startsWith("/interbank"))
+        if (!isInterbankPath(request.getRequestURI()))
         {
             filterChain.doFilter(request, response); return;
         }

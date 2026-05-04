@@ -5,8 +5,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.interbank.config.InterbankProperties;
 import rs.raf.banka2_bek.interbank.protocol.CurrencyCode;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcContractRepository;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcNegotiationRepository;
+import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.interbank.protocol.ForeignBankId;
 import rs.raf.banka2_bek.interbank.protocol.MonetaryValue;
 import rs.raf.banka2_bek.interbank.protocol.OtcNegotiation;
@@ -31,6 +36,18 @@ class OtcNegotiationServiceIntegrationTest {
 
     @Mock
     private InterbankClient client;
+    @Mock
+    private InterbankOtcNegotiationRepository negotiationRepository;
+    @Mock
+    private InterbankOtcContractRepository contractRepository;
+    @Mock
+    private PortfolioRepository portfolioRepository;
+    @Mock
+    private ClientRepository clientRepository;
+    @Mock
+    private EmployeeRepository employeeRepository;
+    @Mock
+    private TransactionExecutorService transactionExecutor;
 
     @Test
     @DisplayName("Pun OTC flow: kreiraj → procitaj (red kupca) → counter → accept")
@@ -38,7 +55,9 @@ class OtcNegotiationServiceIntegrationTest {
         InterbankProperties properties = new InterbankProperties();
         properties.setMyRoutingNumber(OUR_RN);
         properties.setMyBankDisplayName("Banka 2");
-        OtcNegotiationService service = new OtcNegotiationService(client, properties);
+        OtcNegotiationService service = new OtcNegotiationService(client, properties,
+                negotiationRepository, contractRepository, portfolioRepository,
+                clientRepository, employeeRepository, transactionExecutor);
 
         ForeignBankId buyer = new ForeignBankId(OUR_RN, "buyer-1");
         ForeignBankId seller = new ForeignBankId(SELLER_RN, "seller-1");
@@ -103,7 +122,9 @@ class OtcNegotiationServiceIntegrationTest {
     void closeNegotiation_inMidNegotiation() {
         InterbankProperties properties = new InterbankProperties();
         properties.setMyRoutingNumber(OUR_RN);
-        OtcNegotiationService service = new OtcNegotiationService(client, properties);
+        OtcNegotiationService service = new OtcNegotiationService(client, properties,
+                negotiationRepository, contractRepository, portfolioRepository,
+                clientRepository, employeeRepository, transactionExecutor);
 
         ForeignBankId negotiationId = new ForeignBankId(SELLER_RN, "neg-77");
         when(client.postNegotiation(eq(SELLER_RN), any()))

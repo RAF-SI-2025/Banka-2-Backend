@@ -15,6 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import rs.raf.banka2_bek.auth.service.CustomUserDetailsService;
+import rs.raf.banka2_bek.auth.service.JwtBlacklistService;
 import rs.raf.banka2_bek.auth.service.JwtService;
 
 import java.io.IOException;
@@ -31,6 +32,9 @@ class JwtAuthenticationFilterTest {
 
     @Mock
     private CustomUserDetailsService userDetailsService;
+
+    @Mock
+    private JwtBlacklistService blacklistService;
 
     @Mock
     private FilterChain filterChain;

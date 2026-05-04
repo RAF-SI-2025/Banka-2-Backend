@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import rs.raf.banka2_bek.tax.dto.TaxBreakdownItemDto;
 import rs.raf.banka2_bek.tax.dto.TaxRecordDto;
 import rs.raf.banka2_bek.tax.service.TaxService;
 
@@ -51,5 +52,33 @@ public class TaxController {
     public ResponseEntity<Void> triggerCalculation() {
         taxService.calculateTaxForAllUsers();
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * P2.4 — GET /tax/{userId}/{userType}/breakdown - per-listing
+     * granularni breakdown poreza za korisnika. Supervizor only.
+     */
+    @GetMapping("/{userId}/{userType}/breakdown")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
+    public ResponseEntity<List<TaxBreakdownItemDto>> getBreakdown(
+            @PathVariable Long userId,
+            @PathVariable String userType) {
+        return ResponseEntity.ok(taxService.getTaxBreakdownForUser(userId, userType));
+    }
+
+    /**
+     * P2.4 — GET /tax/my/breakdown - per-listing breakdown poreza za
+     * autentifikovanog korisnika.
+     */
+    @GetMapping("/my/breakdown")
+    public ResponseEntity<List<TaxBreakdownItemDto>> getMyBreakdown(Authentication authentication) {
+        String email = authentication.getName();
+        // Resolva email -> (userId, userType) preko getMyTaxRecord
+        TaxRecordDto myRecord = taxService.getMyTaxRecord(email);
+        if (myRecord.getId() == null) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(
+                taxService.getTaxBreakdownForUser(myRecord.getUserId(), myRecord.getUserType()));
     }
 }

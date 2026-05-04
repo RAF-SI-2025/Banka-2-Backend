@@ -9,39 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/*
-================================================================================
- TODO — KONFIGURACIJA PARTNERSKIH BANAKA (PROTOKOL §2.1, §2.10)
- Zaduzen: BE tim
- Spec ref: protokol §2.1 Bank identification (RoutingNumber = prve 3 cifre
-           racuna), §2.10 Authentication (X-Api-Key header)
---------------------------------------------------------------------------------
- Citaj iz application.properties:
-   interbank.my-routing-number=222
-   interbank.my-bank-display-name=Banka 2
-   interbank.partners[0].routing-number=111
-   interbank.partners[0].display-name=Banka 1
-   interbank.partners[0].base-url=http://banka1-api:8080
-   interbank.partners[0].outbound-token=<token koji oni izdaju nama>
-   interbank.partners[0].inbound-token=<token koji mi izdajemo njima>
-   interbank.partners[1].routing-number=333
-   ...
-
- KORISNICI:
-  - BankRoutingService: po prva 3 cifre racuna mapira na PartnerBank.
-  - InterbankClient: na osnovu routingNumber-a pronadje URL + outboundToken
-    i salje HTTP zahtev sa X-Api-Key: <outboundToken> header-om (§2.10).
-  - InterbankInboundController: proverava da X-Api-Key header u dolaznoj
-    poruci odgovara `partners[*].inboundToken` (token koji smo MI izdali
-    toj banci). Nevalidan token -> 401.
-
- NAPOMENA O DVA TOKEN-A:
-  Svaka banka izdaje sopstveni API token za svaku drugu banku (§2.10).
-  Tokeni su asimetricni: token koji A koristi pri slanju ka B nije isti
-  kao token koji B koristi pri slanju ka A. Dva polja: outboundToken
-  (sta saljemo mi) + inboundToken (sta verifikujemo mi).
-================================================================================
-*/
 @Component
 @Configuration
 @ConfigurationProperties(prefix = "interbank")

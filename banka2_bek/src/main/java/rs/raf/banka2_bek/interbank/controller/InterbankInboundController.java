@@ -12,49 +12,6 @@ import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import java.util.Optional;
 
 
-/*
-================================================================================
- TODO — INBOUND ENDPOINT ZA PORUKE OD DRUGIH BANAKA (PROTOKOL §2.11)
- Zaduzen: BE tim
- Spec ref: protokol §2.11 Sending messages, §2.10 Authentication,
-           §2.12 Message types
---------------------------------------------------------------------------------
- JEDINSTVENA TACKA ZA SVE INBOUND PORUKE (po protokolu):
-   POST /interbank
-   Content-Type: application/json
-   X-Api-Key: <token koji smo MI izdali toj banci>
-
- STATUSI ODGOVORA (§2.11):
-   202 Accepted — primljeno ali jos neobradeno; pošiljač retry-uje
-   200 OK       — primljeno + zavrseno; body = response (npr. TransactionVote
-                  za NEW_TX)
-   204 No Content — primljeno + zavrseno bez tela
-   401 — los X-Api-Key
-   400 — malformed envelope
-   500 — internal errors
-
- AUTHENTICATION (§2.10):
-   - Procitaj X-Api-Key header
-   - Provera u BankRoutingService da postoji partner sa tim inboundToken-om
-   - Dodatno: envelope.idempotenceKey.routingNumber MORA biti routingNumber
-     tog partnera (sprecava CSRF iz druge banke)
-
- IDEMPOTENCY (§2.2):
-   - InterbankMessageService.findCachedResponse(envelope.idempotenceKey)
-   - Ako postoji: vrati cached response sa istim httpStatus-om (200/204)
-   - Ako ne: izvrsi handler, pa pozovi recordInboundResponse atomicno
-
- DISPATCH PO TIPU (§2.12):
-   NEW_TX      -> TransactionExecutorService.handleNewTx → vrati TransactionVote (200)
-   COMMIT_TX   -> TransactionExecutorService.handleCommitTx → 204
-   ROLLBACK_TX -> TransactionExecutorService.handleRollbackTx → 204
-
- NAPOMENA:
-   Endpoint-ovi za public-stock, /negotiations/* i /user/* idu u
-   OtcNegotiationController (§3.1-3.7), NE ovde. Ovaj kontroler je samo
-   za §2 Transaction execution protocol.
-================================================================================
-*/
 @RestController
 @RequestMapping("/interbank")
 @RequiredArgsConstructor

@@ -25,19 +25,22 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final ApplicationEventPublisher eventPublisher;
+    private final AccountLockoutService accountLockoutService;
 
     public AuthService(UserRepository userRepository,
                        EmployeeRepository employeeRepository,
                        PasswordResetTokenRepository passwordResetTokenRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
-                       ApplicationEventPublisher eventPublisher) {
+                       ApplicationEventPublisher eventPublisher,
+                       AccountLockoutService accountLockoutService) {
         this.userRepository = userRepository;
         this.employeeRepository = employeeRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.eventPublisher = eventPublisher;
+        this.accountLockoutService = accountLockoutService;
     }
 
     public String register(RegisterRequestDto request) {
@@ -64,41 +67,49 @@ public class AuthService {
     }
 
     public AuthResponseDto login(LoginRequestDto request) {
+        // Opciono.2 — proveri lockout pre nego sto se proveri lozinka.
+        // Bacaja AccountLockedException ako je email lock-ovan (vidi
+        // AuthService client error handling u GlobalExceptionHandler-u).
+        accountLockoutService.assertNotLocked(request.getEmail());
+
         // First, try to find an employee with this email
         Optional<Employee> employeeOpt = employeeRepository.findByEmail(request.getEmail());
         if (employeeOpt.isPresent()) {
             Employee employee = employeeOpt.get();
-            
+
             // Employee passwords are stored with salt concatenated
             String salt = employee.getSaltPassword();
             if (passwordEncoder.matches(request.getPassword() + salt, employee.getPassword())) {
                 if (!Boolean.TRUE.equals(employee.getActive())) {
                     throw new RuntimeException("Employee account is not active");
                 }
-                
+
+                accountLockoutService.recordSuccess(request.getEmail());
                 String accessToken = jwtService.generateAccessToken(employee);
                 String refreshToken = jwtService.generateRefreshToken(employee);
                 return new AuthResponseDto(accessToken, refreshToken);
             }
         }
-        
+
         // If not found as employee or password didn't match, try regular user
         Optional<User> userOpt = userRepository.findByEmail(request.getEmail());
         if (userOpt.isPresent()) {
             User user = userOpt.get();
-            
+
             if (passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                 if (!user.isActive()) {
                     throw new RuntimeException("User account is not active");
                 }
-                
+
+                accountLockoutService.recordSuccess(request.getEmail());
                 String accessToken = jwtService.generateAccessToken(user);
                 String refreshToken = jwtService.generateRefreshToken(user);
                 return new AuthResponseDto(accessToken, refreshToken);
             }
         }
 
-        // Neither employee nor user found, or password didn't match
+        // Neither employee nor user found, or password didn't match — broji failure.
+        accountLockoutService.recordFailure(request.getEmail());
         throw new RuntimeException("Invalid email or password");
     }
 

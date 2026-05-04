@@ -9,7 +9,25 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "cards")
+@Table(
+        name = "cards",
+        // P2.3 — DB-level constraint za max-card-per-account.
+        // PARTIAL UNIQUE INDEX (account_id, client_id, card_slot) gde
+        // status != 'DEACTIVATED'. Dva korisna scenarija:
+        //   * Lični racun: vlasnik (1 client_id) moze imati max 2 kartice
+        //     (slot 1 i slot 2). Treci insert sa slot=1 ili slot=2 baca SQL grom.
+        //   * Poslovni racun: max 1 kartica po ovlascenom licu (client_id).
+        //     Ovlasceno lice ce uvek imati slot=1 — drugi insert za istu osobu
+        //     na isti business account (slot=1) ce udariti u uniqueness.
+        // CHECK constraint card_slot BETWEEN 1 AND 2 sprecava arbitrarne brojeve.
+        indexes = {
+                @Index(name = "ix_cards_account", columnList = "account_id"),
+                @Index(name = "ix_cards_client", columnList = "client_id")
+        },
+        check = @jakarta.persistence.CheckConstraint(
+                name = "ck_card_slot_range",
+                constraint = "card_slot BETWEEN 1 AND 2")
+)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -29,6 +47,19 @@ public class Card {
 
     @Column(nullable = false, length = 3)
     private String cvv;
+
+    /**
+     * Slot pozicija u okviru (account, client) parova: 1 ili 2.
+     * Service-level kod ({@code CardServiceImpl.checkCardLimit}) dodeljuje:
+     *   * Lični racun: 1 ako nema kartice; 2 ako vec postoji slot 1.
+     *   * Poslovni racun: uvek 1 (max 1 kartica po osobi).
+     * Partial UNIQUE INDEX preko (account_id, client_id, card_slot) gde
+     * status != 'DEACTIVATED' enforce-uje DB-level non-duplicate.
+     */
+    @Column(name = "card_slot", nullable = false)
+    @org.hibernate.annotations.ColumnDefault("1")
+    @Builder.Default
+    private Integer cardSlot = 1;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "account_id", nullable = false)
@@ -86,8 +117,18 @@ public class Card {
      * AMERICAN_EXPRESS: 15 digits, prefix 34 or 37
      * The last digit is always the Luhn check digit.
      */
+    /**
+     * Cryptographically-secure RNG za generisanje brojeva kartica i CVV-a.
+     * {@link java.util.Random} je predictable (linear congruential) — napadac koji
+     * vidi nekoliko sukcesivnih izlaza moze da rekonstruise seed i predvidi sve
+     * naredne brojeve, sto je neprihvatljivo za PCI-relevant podatke.
+     * {@link java.security.SecureRandom} koristi OS entropy pool i ne moze se
+     * reverse-engineer-ovati. Singleton inicijalizacija — instanciranje je skupo.
+     */
+    private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
+
     public static String generateCardNumber(CardType cardType) {
-        java.util.Random random = new java.util.Random();
+        java.security.SecureRandom random = SECURE_RANDOM;
 
         String prefix;
         int totalDigits;
@@ -146,6 +187,6 @@ public class Card {
     }
 
     public static String generateCvv() {
-        return String.format("%03d", new java.util.Random().nextInt(1000));
+        return String.format("%03d", SECURE_RANDOM.nextInt(1000));
     }
 }

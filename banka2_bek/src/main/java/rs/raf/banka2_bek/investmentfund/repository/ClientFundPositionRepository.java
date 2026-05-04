@@ -6,20 +6,6 @@ import rs.raf.banka2_bek.investmentfund.model.ClientFundPosition;
 import java.util.List;
 import java.util.Optional;
 
-/*
-================================================================================
- TODO — REPOSITORY ZA CLIENTFUNDPOSITION
- Zaduzen: BE tim
---------------------------------------------------------------------------------
- METODE:
-  - Optional<ClientFundPosition> findByFundIdAndUserIdAndUserRole(Long, Long, String)
-    — upsert pattern (nema? kreiraj; ima? azuriraj totalInvested)
-  - List<ClientFundPosition> findByFundId(Long fundId)
-    — za FundDetailsPage (svi udeli), za FundValueCalculator (sum invested)
-  - List<ClientFundPosition> findByUserIdAndUserRole(Long userId, String userRole)
-    — za "Moji fondovi" tab na MyPortfolioPage
-================================================================================
-*/
 public interface ClientFundPositionRepository extends JpaRepository<ClientFundPosition, Long> {
 
     Optional<ClientFundPosition> findByFundIdAndUserIdAndUserRole(Long fundId, Long userId, String userRole);

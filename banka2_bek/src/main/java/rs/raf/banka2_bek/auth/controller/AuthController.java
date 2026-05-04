@@ -1,19 +1,23 @@
 package rs.raf.banka2_bek.auth.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.auth.dto.*;
 import rs.raf.banka2_bek.auth.service.AuthService;
+import rs.raf.banka2_bek.auth.service.JwtBlacklistService;
 
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
 
     private final AuthService authService;
+    private final JwtBlacklistService blacklistService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, JwtBlacklistService blacklistService) {
         this.authService = authService;
+        this.blacklistService = blacklistService;
     }
 
     @PostMapping("/register")
@@ -41,4 +45,17 @@ public class AuthController {
         return ResponseEntity.ok(authService.refreshToken(request));
     }
 
+    /**
+     * Opciono.1 — Logout. Povlaci access token iz Authorization headera i
+     * stavlja ga na blacklist do isteka TTL-a (15 min). Frontend treba
+     * dodatno da obrise sessionStorage.
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<MessageResponseDto> logout(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            blacklistService.blacklist(authHeader.substring(7));
+        }
+        return ResponseEntity.ok(new MessageResponseDto("Uspesno odjavljen."));
+    }
 }

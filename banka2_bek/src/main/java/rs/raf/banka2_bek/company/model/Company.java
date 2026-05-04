@@ -49,11 +49,22 @@ public class Company {
     @Builder.Default
     private Boolean active = true;
 
-    // Da li je ovo entitet države (Republika Srbija) — koristi se za poreze
+    // Da li je ovo entitet drzave (Republika Srbija) — koristi se za poreze
+    // (TaxService.collectTaxFromUser prebacuje porez na drzavin RSD racun).
     @Column(nullable = false)
     @org.hibernate.annotations.ColumnDefault("0")
     @Builder.Default
     private Boolean isState = false;
+
+    // Da li je ovo entitet nase Banke (Banka 2025 Tim 2). Razdvojeno od
+    // {@link #isState} jer u Celini 3 spec-u i banka i drzava su zasebne
+    // "Firme" (Celina 2 §73-78 i Celina 3 §47).
+    // Koristi InvestmentFundService.createFund kao company-relaciju za
+    // novi fund accountu.
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("0")
+    @Builder.Default
+    private Boolean isBank = false;
 
     @Column(nullable = false, updatable = false)
     @org.hibernate.annotations.ColumnDefault("CURRENT_TIMESTAMP")

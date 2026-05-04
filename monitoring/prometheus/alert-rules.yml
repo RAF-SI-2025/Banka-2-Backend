@@ -1,0 +1,113 @@
+# Prometheus alert rules za Banka2 backend.
+# Evaluacija je u svakom Prometheus scrape ciklusu (15s). Aktivni alert-i
+# se salju na AlertManager (alertmanager:9093) koji rute-uje na Discord
+# preko alert-router bridge servisa.
+
+groups:
+  - name: banka2_availability
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="banka2_backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Banka2 backend nedostupan"
+          description: "Backend instance {{ $labels.instance }} nije odgovorila na scrape vec preko 1 minuta. Aplikacija je verovatno pala ili je network particija aktivna."
+
+      - alert: PrometheusTargetMissing
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target nedostupan"
+          description: "Job {{ $labels.job }} target {{ $labels.instance }} ne odgovara vec 5 minuta."
+
+  - name: banka2_performance
+    interval: 30s
+    rules:
+      - alert: HighRequestLatency
+        # 95-percentilni latency preko 2 sekunde tokom 5 minuta uzastopno.
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job="banka2_backend"}[5m])) by (le, uri)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Visok latency na {{ $labels.uri }}"
+          description: "p95 latency je {{ $value | humanizeDuration }} na {{ $labels.uri }} tokom poslednih 5 minuta."
+
+      - alert: HighErrorRate
+        # Vise od 10% HTTP odgovora je 5xx tokom 5 minuta.
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="banka2_backend",status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count{job="banka2_backend"}[5m]))
+          > 0.10
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Visok 5xx error rate"
+          description: "Preko 10% HTTP odgovora vraca 5xx tokom poslednih 5 minuta. Trenutni rate: {{ $value | humanizePercentage }}."
+
+  - name: banka2_security
+    interval: 15s
+    rules:
+      - alert: BruteForceLogin
+        # Vise od 5 neuspesnih login pokusaja u sekundi tokom 1 minute —
+        # signalizuje potencijalni brute-force napad. AuthRateLimitFilter
+        # vraca 429 posle 10 zahteva u 60s, ali alert trazi i sluchajeve
+        # gde je napadac distribuiran kroz vise IP adresa.
+        expr: rate(banka2_login_failure_total[1m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Sumnja na brute-force login napad"
+          description: "Stopa neuspelih login zahteva je {{ $value | humanize }}/s tokom poslednje minute."
+
+      - alert: RateLimitFloodActive
+        # Vise od 1 rate-limit hit-a u sekundi — neko se aktivno spamuje.
+        expr: rate(banka2_rate_limit_hit_total[1m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Aktivan rate-limit flood na auth endpoint-ima"
+          description: "{{ $value | humanize }} 429 odgovora u sekundi. Verovatno automatizovan klijent."
+
+  - name: banka2_resources
+    interval: 30s
+    rules:
+      - alert: HighJvmHeapUsage
+        # JVM heap koristi preko 90% maksimuma tokom 5 minuta — risk od OutOfMemoryError-a.
+        expr: |
+          sum(jvm_memory_used_bytes{job="banka2_backend",area="heap"})
+          /
+          sum(jvm_memory_max_bytes{job="banka2_backend",area="heap"})
+          > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Visoka JVM heap upotreba"
+          description: "Heap je na {{ $value | humanizePercentage }} kapaciteta tokom poslednih 5 minuta."
+
+      - alert: DatabaseConnectionPoolExhausted
+        # Sve HikariCP konekcije zauzete tokom 2 minute.
+        expr: hikaricp_connections_active{job="banka2_backend"} >= hikaricp_connections_max{job="banka2_backend"}
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "DB connection pool exhausted"
+          description: "Sve {{ $labels.pool }} konekcije zauzete vec 2 minuta. Verovatan connection leak."

@@ -1,0 +1,35 @@
+global:
+  resolve_timeout: 5m
+
+# Templates za rute-ovanje alert-a.
+route:
+  # Glavna ruta — sve ide na Discord (preko alert-router bridge-a).
+  receiver: discord-via-bridge
+  group_by: ['alertname', 'severity']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    # Critical alert-i idu odmah, bez group_wait kasnjenja.
+    - matchers:
+        - severity = "critical"
+      receiver: discord-via-bridge
+      group_wait: 0s
+      repeat_interval: 1h
+
+receivers:
+  - name: discord-via-bridge
+    webhook_configs:
+      - url: http://alert-router:8093/alert
+        send_resolved: true
+        max_alerts: 0
+
+# Inhibition rules — kad je BackendDown aktivan, suprimiramo sve ostale
+# alert-e za isti backend (HighErrorRate, HighRequestLatency su posledica
+# pada — ne treba duplo notifikovati).
+inhibit_rules:
+  - source_matchers:
+      - alertname = "BackendDown"
+    target_matchers:
+      - team = "backend"
+    equal: ['cluster']

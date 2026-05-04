@@ -191,11 +191,47 @@ public class CardServiceImpl implements CardService {
         }
     }
 
+    /**
+     * P2.3 — alocira slot 1 ili 2 za novu karticu. Slot je deo
+     * partial UNIQUE INDEX-a (account_id, client_id, card_slot) gde
+     * status != 'DEACTIVATED' — DB-level enforcement preventiva za
+     * race-condition (dva paralelna createCard mogu da prodju kroz
+     * service-level checkCardLimit ali DB ce odbiti drugi insert).
+     *
+     * @return 1 ili 2 (uvek 1 za poslovne, 1 ili 2 za licne)
+     * @throws RuntimeException ako su svi slotovi zauzeti
+     */
+    private int allocateSlot(Account account, Client client) {
+        boolean isBusiness = account.getAccountType() == AccountType.BUSINESS;
+        // Aktivne kartice ZA TAJ par (account, client) — slotovi su per-par-ovi.
+        List<Card> existing = cardRepository.findByAccountIdAndClientIdAndStatusNot(
+                account.getId(), client.getId(), CardStatus.DEACTIVATED);
+        java.util.Set<Integer> taken = existing.stream()
+                .map(Card::getCardSlot)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (isBusiness) {
+            // Poslovni: slot uvek 1 (max 1 kartica po osobi)
+            if (taken.contains(1)) {
+                throw new RuntimeException("Ovlasceno lice vec ima karticu za ovaj poslovni racun (slot 1 zauzet)");
+            }
+            return 1;
+        }
+
+        // Licni: 1 ili 2
+        if (!taken.contains(1)) return 1;
+        if (!taken.contains(2)) return 2;
+        throw new RuntimeException("Dostignut maksimalan broj kartica za ovaj racun (2)");
+    }
+
     private Card createAndSaveCard(Account account, Client client, BigDecimal limit, CardType cardType) {
         String cardNumber;
         do {
             cardNumber = Card.generateCardNumber(cardType);
         } while (cardRepository.findByCardNumber(cardNumber).isPresent());
+
+        int slot = allocateSlot(account, client);
 
         Card card = Card.builder()
                 .cardNumber(cardNumber)
@@ -205,6 +241,7 @@ public class CardServiceImpl implements CardService {
                 .account(account)
                 .client(client)
                 .cardLimit(limit)
+                .cardSlot(slot)
                 .status(CardStatus.ACTIVE)
                 .createdAt(LocalDate.now())
                 .expirationDate(LocalDate.now().plusYears(4))

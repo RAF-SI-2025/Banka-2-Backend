@@ -263,14 +263,14 @@ VALUES
 -- ============================================================
 
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (1, 'TechStar DOO', '12345678', '123456789', '62.01',
      'Bulevar Mihajla Pupina 10, Novi Beograd',
-     NULL, 1, 0, NOW()),
+     NULL, 1, 0, 0, NOW()),
     (2, 'Green Food AD', '87654321', '987654321', '10.10',
      'Industrijska zona bb, Subotica',
-     NULL, 1, 0, NOW());
+     NULL, 1, 0, 0, NOW());
 
 -- ============================================================
 -- AUTHORIZED PERSONS (ovlascena lica za firme)
@@ -392,21 +392,23 @@ VALUES
 -- kao placeholder jer je to banka u vlasnistvu... Alternativa: kreiramo posebnu
 -- firmu "Banka 2025" kao company.
 
--- Prvo kreiramo firmu za banku
+-- Prvo kreiramo firmu za banku (is_bank=1, is_state=0 — Celina 2 §73-78
+-- "Nasa Banka = Firma" ima poseban status u sistemu)
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (3, 'Banka 2025 Tim 2', '22200022', '222000222', '64.19',
      'Bulevar Kralja Aleksandra 73, Beograd',
-     NULL, 1, 0, NOW());
+     NULL, 1, 0, 1, NOW());
 
--- Država (Republika Srbija) — poseban entitet za uplatu poreza
+-- Drzava (Republika Srbija, is_state=1) — poseban entitet za uplatu poreza,
+-- Celina 3 §47 "naša država = Firma" sa RSD racunom za porez na dobit.
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (4, 'Republika Srbija', '17858459', '100002288', '84.11',
      'Nemanjina 11, Beograd',
-     NULL, 1, 1, NOW());
+     NULL, 1, 1, 0, NOW());
 
 -- Bankini racuni u svim valutama
 INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,

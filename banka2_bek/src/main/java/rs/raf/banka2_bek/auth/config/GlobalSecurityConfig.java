@@ -24,11 +24,28 @@ public class GlobalSecurityConfig  {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final InterbankAuthFilter interbankAuthFilter;
+    private final AuthRateLimitFilter authRateLimitFilter;
 
-    public GlobalSecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, InterbankAuthFilter interbankAuthFilter) {
+    public GlobalSecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                                InterbankAuthFilter interbankAuthFilter,
+                                AuthRateLimitFilter authRateLimitFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.interbankAuthFilter = interbankAuthFilter;
+        this.authRateLimitFilter = authRateLimitFilter;
     }
+
+    /**
+     * CORS origin lista cita se iz {@code CORS_ALLOWED_ORIGINS} env var-a
+     * (comma-separated). Ako je var empty — koristimo dev default
+     * (localhost:3000 + 5173). Production override:
+     * {@code CORS_ALLOWED_ORIGINS=https://banka.example.com,https://admin.example.com}.
+     */
+    // Default-i pokrivaju sve dev FE port-ove:
+    //   3000 — standardni nginx host port (CLAUDE.md default)
+    //   3500 — fallback kad Hyper-V/WinNAT na Windows-u rezervise 2996-3095 range
+    //   5173 — Vite dev server (`npm run dev` direktno, bez Docker-a)
+    @org.springframework.beans.factory.annotation.Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3500,http://localhost:5173}")
+    private String corsAllowedOrigins;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -43,13 +60,17 @@ public class GlobalSecurityConfig  {
                                 "/auth/password_reset/request",
                                 "/auth/password_reset/confirm",
                                 "/auth/refresh",
+                                "/auth/logout",
                                 "/auth-employee/activate",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/v3/api-docs",
                                 "/exchange-rates",
-                                "/exchange/calculate"
+                                "/exchange/calculate",
+                                "/actuator/health",
+                                "/actuator/info",
+                                "/actuator/prometheus"
                         ).permitAll()
                         .requestMatchers("/employees/**").hasAnyRole("ADMIN", "EMPLOYEE")
                         .requestMatchers("/clients/**").hasAnyRole("ADMIN", "EMPLOYEE")
@@ -97,14 +118,16 @@ public class GlobalSecurityConfig  {
                         // Profit Banke: samo supervizori (Celina 4 (Nova) §4393-4408).
                         .requestMatchers("/profit-bank/**").hasAnyAuthority(
                                 "ROLE_ADMIN", "ADMIN", "SUPERVISOR")
-                        // Inter-bank /interbank endpoint je JEDINSTVEN ulaz za druge banke,
-                        // X-Api-Key auth se proverava u kontroleru (vidi protokol §2.10).
-                        // TODO: kad se implementira ApiKey filter (registrovan kao
-                        //       jwtAuthenticationFilter alternativa za ove pathove),
-                        //       zameniti permitAll sa custom matcher-om koji preskace JWT.
-                        .requestMatchers("/interbank/**").hasAuthority("ROLE_INTERBANK")
-                        .requestMatchers( "/negotiations/**",
-                                "/public-stock", "/user/*/**").permitAll()
+                        // Inter-bank /interbank endpoint je JEDINSTVEN ulaz za druge banke;
+                        // InterbankAuthFilter validira X-Api-Key i postavlja ROLE_INTERBANK
+                        // authority pre nego sto request stigne ovde (vidi protokol §2.10).
+                        // /interbank — JEDINSTVEN ulaz za 2PC poruke izmedju banaka (§2.11)
+                        // /public-stock, /negotiations/**, /user/{rn}/{id} — §3.x OTC pozivi
+                        // Sve trazi ROLE_INTERBANK koji InterbankAuthFilter postavlja na osnovu
+                        // valjanog X-Api-Key headera (§2.10).
+                        .requestMatchers("/interbank/**", "/public-stock",
+                                "/negotiations/**", "/user/*/**")
+                                .hasAuthority("ROLE_INTERBANK")
                         // Arbitro asistent — svi autentifikovani korisnici (klijenti + zaposleni)
                         .requestMatchers("/assistant/**").authenticated()
                         .anyRequest().authenticated()
@@ -115,9 +138,27 @@ public class GlobalSecurityConfig  {
                 .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
         )
+                // Filter chain order: rate limit najdublje, pa interbank API key,
+                // pa JWT auth. Svaki invalidan auth pokusaj puca pre nego sto stigne
+                // do JWT validacije (sprecava brute-force i side-channel napade).
+                .addFilterBefore(authRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(interbankAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // Security response headers (defense-in-depth) — primenjuju se na sve
+                // odgovore. nginx ima svoje header-e takodje, ali Spring dodaje za
+                // direktan dev pristup BE-u (8080) gde nginx ne stoji.
+                .headers(headers -> headers
+                        .contentTypeOptions(c -> {})       // X-Content-Type-Options: nosniff
+                        .frameOptions(f -> f.deny())       // X-Frame-Options: DENY (clickjacking)
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(true)
+                                .maxAgeInSeconds(31_536_000)) // 1 godina HSTS
+                        .referrerPolicy(r -> r.policy(
+                                org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
+                                        .ReferrerPolicy.NO_REFERRER))
+                        .permissionsPolicyHeader(p -> p.policy(
+                                "geolocation=(), microphone=(), camera=()"))
+                );
 
         return http.build();
     }
@@ -130,10 +171,21 @@ public class GlobalSecurityConfig  {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:5173"));
+        // Origin-i iz env var-a (comma-separated). Production: prebaci na
+        // https://banka.example.com,https://admin.example.com — sve ostale rejectaj.
+        List<String> origins = java.util.Arrays.stream(corsAllowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        // Specificni header-i umesto "*" — wildcard sa allowCredentials=true je
+        // forbidden po CORS spec-u (browser ce odbiti) i smanjuje attack surface.
+        config.setAllowedHeaders(List.of(
+                "Authorization", "Content-Type", "Accept", "X-Requested-With",
+                "X-Api-Key", "X-Forwarded-For", "Cache-Control"));
         config.setAllowCredentials(true);
+        config.setMaxAge(3600L); // preflight cache 1h
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

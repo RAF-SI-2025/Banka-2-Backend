@@ -14,35 +14,6 @@ import rs.raf.banka2_bek.investmentfund.service.InvestmentFundService;
 import java.time.LocalDate;
 import java.util.List;
 
-/*
-================================================================================
- TODO — REST ENDPOINTI ZA INVESTICIONE FONDOVE
- Zaduzen: BE tim
---------------------------------------------------------------------------------
- ENDPOINTI I SECURITY:
-   GET   /funds                      authenticated (klijenti + aktuari; discovery)
-   GET   /funds/{id}                 authenticated (detalj)
-   GET   /funds/{id}/performance     authenticated
-   GET   /funds/{id}/transactions    authenticated (audit; supervizori svi, klijenti samo svoj fond-id pair)
-   POST  /funds                      ADMIN, SUPERVISOR (create)
-   POST  /funds/{id}/invest          authenticated (klijent iz svog racuna; supervizor iz bankinog)
-   POST  /funds/{id}/withdraw        authenticated (klijent sa svoje pozicije; supervizor sa bankine)
-   GET   /funds/my-positions         authenticated (moji udeli)
-   GET   /funds/bank-positions       ADMIN, SUPERVISOR (za Profit Banke portal)
-
- SECURITY napomena:
-  - "/funds" i "/funds/**" dodati u GlobalSecurityConfig pod authenticated.
-  - POST /funds ima @PreAuthorize("hasAnyRole('ADMIN','EMPLOYEE')") dodatno
-    proveri u service da je SUPERVISOR po ActuaryInfo.
-
- ERROR HANDLING:
-  - @RestControllerAdvice InvestmentFundExceptionHandler u istoj paketi.
-  - EntityNotFoundException -> 404
-  - IllegalArgumentException -> 400
-  - InsufficientFundsException -> 400
-  - AccessDeniedException -> 403
-================================================================================
-*/
 @RestController
 @RequestMapping("/funds")
 @RequiredArgsConstructor
@@ -113,5 +84,21 @@ public class InvestmentFundController {
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN', 'SUPERVISOR')")
     public ResponseEntity<List<ClientFundPositionDto>> bankPositions() {
         return ResponseEntity.ok(investmentFundService.listBankPositions());
+    }
+
+    /**
+     * Ad-hoc prebacivanje vlasnistva fonda na drugog supervizora.
+     * Samo admin (Celina 4 §324: "samo admini mogu da dodaju i uklanjaju
+     * permisije isAgent, isSupervisor"). Bulk varijanta (kad admin oduzme
+     * isSupervisor permisiju) se i dalje desava automatski kroz
+     * {@code EmployeeServiceImpl.updateEmployee}.
+     */
+    @PostMapping("/{id}/reassign-manager")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN')")
+    public ResponseEntity<InvestmentFundDetailDto> reassignManager(
+            @PathVariable Long id,
+            @Valid @RequestBody ReassignFundManagerDto dto) {
+        return ResponseEntity.ok(
+                investmentFundService.reassignSingleFundManager(id, dto.getNewManagerEmployeeId()));
     }
 }
