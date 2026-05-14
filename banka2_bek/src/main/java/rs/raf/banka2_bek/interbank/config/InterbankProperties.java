@@ -9,39 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/*
-================================================================================
- TODO — KONFIGURACIJA PARTNERSKIH BANAKA (PROTOKOL §2.1, §2.10)
- Zaduzen: BE tim
- Spec ref: protokol §2.1 Bank identification (RoutingNumber = prve 3 cifre
-           racuna), §2.10 Authentication (X-Api-Key header)
---------------------------------------------------------------------------------
- Citaj iz application.properties:
-   interbank.my-routing-number=222
-   interbank.my-bank-display-name=Banka 2
-   interbank.partners[0].routing-number=111
-   interbank.partners[0].display-name=Banka 1
-   interbank.partners[0].base-url=http://banka1-api:8080
-   interbank.partners[0].outbound-token=<token koji oni izdaju nama>
-   interbank.partners[0].inbound-token=<token koji mi izdajemo njima>
-   interbank.partners[1].routing-number=333
-   ...
-
- KORISNICI:
-  - BankRoutingService: po prva 3 cifre racuna mapira na PartnerBank.
-  - InterbankClient: na osnovu routingNumber-a pronadje URL + outboundToken
-    i salje HTTP zahtev sa X-Api-Key: <outboundToken> header-om (§2.10).
-  - InterbankInboundController: proverava da X-Api-Key header u dolaznoj
-    poruci odgovara `partners[*].inboundToken` (token koji smo MI izdali
-    toj banci). Nevalidan token -> 401.
-
- NAPOMENA O DVA TOKEN-A:
-  Svaka banka izdaje sopstveni API token za svaku drugu banku (§2.10).
-  Tokeni su asimetricni: token koji A koristi pri slanju ka B nije isti
-  kao token koji B koristi pri slanju ka A. Dva polja: outboundToken
-  (sta saljemo mi) + inboundToken (sta verifikujemo mi).
-================================================================================
-*/
 @Component
 @Configuration
 @ConfigurationProperties(prefix = "interbank")
@@ -73,9 +40,37 @@ public class InterbankProperties {
 
         /** Token koji mi izdajemo partner banci; verifikujemo ga u X-Api-Key headeru. */
         private String inboundToken;
+
+        /**
+         * §3.7 GET /user path template — po spec-u je <code>/user/{rn}/{id}</code>,
+         * ali neki partneri (Tim 1) su rerouted-ovali endpoint na
+         * <code>/interbank/user/{rn}/{id}</code> zbog internih path collision-a sa
+         * frontend rutama. Default je per-spec; override po partneru u
+         * <code>application.properties</code>:
+         * <pre>interbank.partners[0].user-info-path=/interbank/user/{rn}/{id}</pre>
+         * Placeholderi <code>{rn}</code> i <code>{id}</code> ce biti zamenjeni od
+         * strane <code>InterbankClient.getUserInfo()</code> kroz RestClient URI
+         * template substitution.
+         */
+        private String userInfoPath = "/user/{rn}/{id}";
     }
 
     public Optional<PartnerBank> findByApiKey(String apiKey) {
-        return partners.stream().filter(p -> p.getInboundToken().equals(apiKey)).findFirst();
+        if (apiKey == null || apiKey.isBlank()) {
+            return Optional.empty();
+        }
+        return partners.stream()
+                .filter(p -> p.getInboundToken() != null && p.getInboundToken().equals(apiKey))
+                .findFirst();
+    }
+
+    /** Pronalazenje partnera po routing broju (npr. iz Posting/TxAccount). */
+    public Optional<PartnerBank> findByRoutingNumber(Integer routingNumber) {
+        if (routingNumber == null) {
+            return Optional.empty();
+        }
+        return partners.stream()
+                .filter(p -> routingNumber.equals(p.getRoutingNumber()))
+                .findFirst();
     }
 }

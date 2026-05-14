@@ -31,6 +31,18 @@ public class OtcController {
         return ResponseEntity.ok(otcService.listDiscoveryListings());
     }
 
+    /**
+     * Moje sopstvene javne akcije — portfolio item-i koje sam stavio u
+     * javni rezim (publicQuantity > 0). User ne vidi svoje akcije u
+     * Discovery-ju (linije 106-107 listDiscoveryListings filtriraju
+     * `me.userId()`), pa ovaj endpoint daje vidljivost tom rezimu —
+     * sta sam ja objavio za druge.
+     */
+    @GetMapping("/listings/my")
+    public ResponseEntity<List<OtcListingDto>> listMyPublicListings() {
+        return ResponseEntity.ok(otcService.listMyPublicListings());
+    }
+
     @GetMapping("/offers/active")
     public ResponseEntity<List<OtcOfferDto>> listMyActiveOffers() {
         return ResponseEntity.ok(otcService.listMyActiveOffers());

@@ -115,6 +115,24 @@ public class OtcService {
                 .toList();
     }
 
+    /**
+     * Moje sopstvene javne akcije — portfolio item-i tekuceg korisnika
+     * gde je publicQuantity > 0. Razliciti od {@link #listDiscoveryListings}
+     * koji eksplicitno filtrira `me.userId()` (Discovery prikazuje samo tude
+     * akcije za pravljenje ponuda). Ovaj endpoint daje user-u vidljivost
+     * tome STA JE on objavio za druge — UX bag prijavljen 10.05.2026 vece-7
+     * ("ne vidim svoje akcije da su javne").
+     */
+    public List<OtcListingDto> listMyPublicListings() {
+        UserContext me = resolveCurrentUser();
+        ensureOtcAccess(me);
+        return portfolioRepository.findByUserIdAndUserRole(me.userId(), me.userRole()).stream()
+                .filter(p -> p.getPublicQuantity() != null && p.getPublicQuantity() > 0)
+                .map(this::toListingDto)
+                .sorted(Comparator.comparing(OtcListingDto::getListingTicker))
+                .toList();
+    }
+
     // ────────────────────────── Offers ──────────────────────────
 
     public List<OtcOfferDto> listMyActiveOffers() {

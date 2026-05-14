@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.investmentFund.service;
+package rs.raf.banka2_bek.investmentfund.service;
 
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.DisplayName;
@@ -133,7 +133,7 @@ class InvestmentFundServiceCoreTest {
         when(actuaryInfoRepository.findByEmployeeId(supervisorId)).thenReturn(Optional.of(actuaryInfo));
         when(employeeRepository.findById(supervisorId)).thenReturn(Optional.of(supervisor));
         when(currencyRepository.findByCode("RSD")).thenReturn(Optional.of(rsd));
-        when(companyRepository.findByIsStateTrue()).thenReturn(Optional.of(bank));
+        when(companyRepository.findByIsBankTrue()).thenReturn(Optional.of(bank));
         when(accountRepository.existsByAccountNumber(anyString())).thenReturn(false);
         when(accountRepository.save(any())).thenReturn(savedAccount);
         when(investmentFundRepository.save(any())).thenReturn(savedFund);

@@ -118,4 +118,14 @@ public class InterbankMessage {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * Optimistic lock version — sprecava race condition izmedju dva retry
+     * scheduler-a koja istovremeno povuku istu PENDING poruku. JPA baca
+     * OptimisticLockException ako se verzija promenila izmedju load-a i save-a;
+     * scheduler tretira to kao "drugi je vec uzeo, preskoci do sledeceg ciklusa".
+     */
+    @Version
+    @Column(name = "version")
+    private Long version;
+
 }

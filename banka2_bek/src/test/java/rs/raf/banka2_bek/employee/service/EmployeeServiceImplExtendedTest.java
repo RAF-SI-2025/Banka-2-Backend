@@ -92,11 +92,15 @@ class EmployeeServiceImplExtendedTest {
     }
 
     @Test void update_ok() {
+        // Spec §30 + Bug T1-010 (12.05.2026): email se NE moze menjati. Test sad
+        // proverava update sa istim email-om (idempotent) + drugim ne-email
+        // poljem (firstName).
         Employee e = emp(1L, true, Set.of("READ"));
         when(employeeRepository.findById(1L)).thenReturn(Optional.of(e));
-        when(employeeRepository.existsByEmailAndIdNot("n@b.rs", 1L)).thenReturn(false);
         when(employeeRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-        UpdateEmployeeRequestDto req = new UpdateEmployeeRequestDto(); req.setFirstName("N"); req.setEmail("n@b.rs");
+        UpdateEmployeeRequestDto req = new UpdateEmployeeRequestDto();
+        req.setFirstName("N");
+        req.setEmail("m@b.rs"); // isti email kao postojeci → no-op
         assertThat(service.updateEmployee(1L, req).getFirstName()).isEqualTo("N");
     }
 
@@ -105,11 +109,14 @@ class EmployeeServiceImplExtendedTest {
         assertThatThrownBy(() -> service.updateEmployee(1L, new UpdateEmployeeRequestDto())).isInstanceOf(IllegalStateException.class);
     }
 
-    @Test void update_dupEmail_fails() {
+    @Test void update_emailChange_rejected() {
+        // Bug T1-010: pokusaj promene email-a vraca IllegalArgumentException sa
+        // jasnom porukom. Pre 12.05.2026 BE je propustao izmenu email-a.
         when(employeeRepository.findById(1L)).thenReturn(Optional.of(emp(1L, true, Set.of("READ"))));
-        when(employeeRepository.existsByEmailAndIdNot("d@b.rs", 1L)).thenReturn(true);
         UpdateEmployeeRequestDto req = new UpdateEmployeeRequestDto(); req.setEmail("d@b.rs");
-        assertThatThrownBy(() -> service.updateEmployee(1L, req)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.updateEmployee(1L, req))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Email zaposlenog se ne moze menjati");
     }
 
     @Test void deactivate_ok() {

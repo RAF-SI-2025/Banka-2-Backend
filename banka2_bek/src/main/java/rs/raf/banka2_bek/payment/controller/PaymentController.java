@@ -64,6 +64,17 @@ public class PaymentController {
 
         java.util.Map<String, Object> verifyResult = otpService.verify(email, otpCode);
         if (!Boolean.TRUE.equals(verifyResult.get("verified"))) {
+            // T2-012: ako je verifikacija otkazana zbog 3 neuspela pokusaja ili isteka,
+            // perzistuj ABORTED placanje radi audit trail-a (spec §C2 Sc 14).
+            if (Boolean.TRUE.equals(verifyResult.get("blocked"))) {
+                String reason = String.valueOf(verifyResult.getOrDefault("message", "OTP otkazano"));
+                Long abortedId = paymentService.recordAbortedPayment(request, reason);
+                if (abortedId != null) {
+                    java.util.Map<String, Object> withAudit = new java.util.LinkedHashMap<>(verifyResult);
+                    withAudit.put("abortedPaymentId", abortedId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(withAudit);
+                }
+            }
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(verifyResult);
         }
 
@@ -158,13 +169,26 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getPaymentHistory(pageable, fromDateTime, toDateTime, minAmount, maxAmount, type));
     }
 
-    @Operation(summary = "Request OTP code", description = "Generates and sends a verification code to the authenticated user's email.")
+    @Operation(summary = "Request OTP code", description = "Generates and sends a verification code to the authenticated user's email. If a payment payload is provided, BE preflights validacija (balans, limiti, primalac) PRE generisanja OTP-a — T2-009 fix.")
     @PostMapping("/request-otp")
     public ResponseEntity<java.util.Map<String, Object>> requestOtp(
+            @RequestBody(required = false) CreatePaymentRequestDto request,
             org.springframework.security.core.Authentication auth) {
         String email = auth != null ? auth.getName() : null;
         if (email == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        // T2-009: ako FE salje payment payload, preflight balans/limiti/primalac
+        // PRE generisanja OTP-a, da ne zatraži kod za nevazece placanje.
+        if (request != null && request.getFromAccount() != null && request.getToAccount() != null
+                && request.getAmount() != null) {
+            try {
+                paymentService.validatePayment(request);
+            } catch (IllegalArgumentException ex) {
+                return ResponseEntity.badRequest().body(java.util.Map.of(
+                        "sent", false,
+                        "message", ex.getMessage()));
+            }
         }
         otpService.generateAndSend(email);
         return ResponseEntity.ok(java.util.Map.of(

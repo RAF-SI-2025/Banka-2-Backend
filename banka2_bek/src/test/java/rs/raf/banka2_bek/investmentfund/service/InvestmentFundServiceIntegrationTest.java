@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.investmentFund.service;
+package rs.raf.banka2_bek.investmentfund.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -60,7 +60,7 @@ class InvestmentFundServiceIntegrationTest {
                 .registrationNumber("22200022")
                 .taxNumber("100000001")
                 .address("Bulevar Kralja Aleksandra 1, Beograd")
-                .isState(true)
+                .isBank(true)
                 .build();
         companyRepository.save(bank);
 

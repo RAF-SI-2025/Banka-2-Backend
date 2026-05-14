@@ -36,6 +36,11 @@ public class InterbankRetryScheduler {
         for (InterbankMessage msg : pending) {
             try {
                 retryOne(msg);
+            } catch (org.springframework.orm.ObjectOptimisticLockingFailureException oneTried) {
+                // Drugi scheduler instance je vec uzeo ovu poruku — preskoci tiho,
+                // sledeci ciklus ce videti sveze stanje.
+                log.debug("Retry skipped (concurrent worker took msg id={}): {}",
+                        msg.getId(), oneTried.getMessage());
             } catch (Exception e) {
                 log.error("Retry error msg id={} type={}: {}",
                         msg.getId(), msg.getMessageType(), e.getMessage());

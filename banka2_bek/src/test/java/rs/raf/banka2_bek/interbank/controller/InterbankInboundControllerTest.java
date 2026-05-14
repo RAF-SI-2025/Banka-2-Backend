@@ -114,6 +114,42 @@ class InterbankInboundControllerTest {
                         .content(envelope))
                 .andExpect(status().isUnauthorized());
     }
+    @Test
+    @DisplayName("POST /interbank with malformed envelope returns 400")
+    void receiveMessage_malformedEnvelope_returns400() throws Exception {
+        String malformedEnvelope = """
+            {
+              "idempotenceKey": {
+                "routingNumber": 111,
+                "locallyGeneratedKey": "key-bad"
+              },
+              "messageType": "NEW_TX"
+            }
+            """;
+
+        mockMvc.perform(post("/interbank")
+                        .header("X-Api-Key", VALID_INBOUND_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(malformedEnvelope))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(messageService, executorService);
+    }
+    @Test
+    @DisplayName("POST /interbank returns 500 when executor throws unexpected exception")
+    void receiveMessage_executorThrows_returns500() throws Exception {
+        when(messageService.findCachedResponse(any())).thenReturn(Optional.empty());
+        when(executorService.handleNewTx(any(Transaction.class), any(IdempotenceKey.class)))
+                .thenThrow(new RuntimeException("unexpected error"));
+
+        mockMvc.perform(post("/interbank")
+                        .header("X-Api-Key", VALID_INBOUND_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(buildNewTxEnvelope()))
+                .andExpect(status().isInternalServerError());
+
+        verify(executorService).handleNewTx(any(Transaction.class), any(IdempotenceKey.class));
+    }
 
     // -------------------------------------------------------------------------
     // Idempotency cache hit
@@ -196,6 +232,7 @@ class InterbankInboundControllerTest {
 
         verify(executorService).handleRollbackTx(any(RollbackTransaction.class), any(IdempotenceKey.class));
     }
+
 
     // -------------------------------------------------------------------------
     // Helpers

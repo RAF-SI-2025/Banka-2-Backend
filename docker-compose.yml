@@ -14,11 +14,63 @@ services:
       - "6433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Init scripts se izvrsavaju samo pri PRVOM boot-u (kada je data dir prazan).
+      # Postavlja replication user-a, replication slot, i pg_hba pravila — sve sto
+      # treba primary-ju da bi mogao da prima konekcije od read replice.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=5"
+      - "-c"
+      - "max_replication_slots=5"
+      - "-c"
+      - "hot_standby=on"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U banka2user -d banka2"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Streaming read replika — pg_basebackup pri prvom boot-u, pa hot_standby mode.
+  # SELECT-i su dozvoljeni, INSERT/UPDATE/DELETE/DDL bacaju gresku ("cannot execute
+  # ... in a read-only transaction"). Spring `routingDataSource` preusmerava
+  # `@Transactional(readOnly = true)` zahteve ovde, write-ove na `db`.
+  db_replica:
+    image: postgres:16-alpine
+    container_name: banka2_db_replica
+    environment:
+      PGUSER: banka2user
+      PRIMARY_HOST: db
+      PRIMARY_PORT: "5432"
+      # Primary admin kredencijali — koriste se SAMO ako bootstrap script otkrije
+      # da replication user/slot ne postoje na primary-ju (samo-ozdravnja kad je
+      # raniji boot primary-ja pao na CRLF/bash^M init scriptu i propustio da
+      # ih kreira). Vidi bootstrap-replica.sh `ensure_replication_setup`.
+      PRIMARY_DB: banka2
+      PRIMARY_USER: banka2user
+      PRIMARY_PASSWORD: banka2pass
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: replicator_pass
+      REPLICATION_SLOT: banka2_replica_slot
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./db-replica-init/bootstrap-replica.sh:/usr/local/bin/bootstrap-replica.sh:ro
+    entrypoint: ["/usr/local/bin/bootstrap-replica.sh"]
+    ports:
+      - "6434:5432"  # host pristup repliki za eksterni debug (Adminer/psql).
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Replica je zdrava ako pg_isready prolazi I baza je u recovery mode-u.
+      test: ["CMD-SHELL", "pg_isready -U banka2user -d banka2 && psql -U banka2user -d banka2 -tAc 'SELECT pg_is_in_recovery()' | grep -q 't'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   adminer:
     image: adminer
@@ -26,24 +78,61 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: db
       ADMINER_DESIGN: pepa-linha
+    # Adminer host port je env-driven (default 9001). Na Windows-u Hyper-V/WinNAT
+    # cesto rezervise 8568-9167 opseg (Bug 12.05.2026: "ports are not available...
+    # access permissions"). Default je 9001 jer to ima u CLAUDE.md istoriji,
+    # ali svako moze override-ovati preko env var-a (npr. ADMINER_HOST_PORT=9200
+    # za port iznad Hyper-V opsega).
     ports:
-      - "9001:8080"
+      - "${ADMINER_HOST_PORT:-9001}:8080"
 
   # Spring Boot backend
   backend:
     build: ./banka2_bek
     container_name: banka2_backend
     ports:
-      - "8080:8080"
+      # Default 8080. Overrideuj sa BACKEND_HOST_PORT env var-om ako lokalno
+      # imas konflikt (npr. drugi projekat koji takodje sluša 8080):
+      #   BACKEND_HOST_PORT=8088 docker compose up -d
+      - "${BACKEND_HOST_PORT:-8080}:8080"
     environment:
+      # Primary (read-write) — DDL + INSERT/UPDATE/DELETE + bilo sta van readOnly transakcija.
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/banka2
       SPRING_DATASOURCE_USERNAME: banka2user
       SPRING_DATASOURCE_PASSWORD: banka2pass
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      # Read replica — koristi se za @Transactional(readOnly=true) putem
+      # AbstractRoutingDataSource. Ako ${REPLICA_*} env vars nisu setovani,
+      # Spring ce padnuti routing i sve ide na primary (graceful fallback).
+      BANKA2_DATASOURCE_REPLICA_URL: jdbc:postgresql://db_replica:5432/banka2
+      BANKA2_DATASOURCE_REPLICA_USERNAME: banka2user
+      BANKA2_DATASOURCE_REPLICA_PASSWORD: banka2pass
+      BANKA2_DATASOURCE_REPLICA_ENABLED: "true"
+      # InfluxDB konfiguracija — write-ovi OHLCV tickove iz ListingPriceRecorder-a.
+      BANKA2_INFLUX_URL: http://influxdb:8086
+      BANKA2_INFLUX_TOKEN: ${INFLUX_TOKEN:-dev-token-change-me-32-bytes-minimum}
+      BANKA2_INFLUX_ORG: ${INFLUX_ORG:-banka2}
+      BANKA2_INFLUX_BUCKET: ${INFLUX_BUCKET:-tick-listings}
+      BANKA2_INFLUX_ENABLED: "true"
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_SHOW_SQL: "false"
       SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
       SPRING_JPA_PROPERTIES_HIBERNATE_TYPE_PREFERRED_BOOLEAN_JDBC_TYPE: INTEGER
+      # Auth rate limit (Bucket4j) — production radi 10 req/min/IP, ali za
+      # E2E test sesije (Cypress live) capacity se podize na 100k da test
+      # suite ne hituje 429. NAPOMENA: enabled MORA biti `true` jer
+      # GlobalSecurityConfig konstruktorski zavisi od AuthRateLimitFilter
+      # bean-a (nije Optional). Sa capacity=100k filter je no-op u praksi.
+      AUTH_RATE_LIMIT_ENABLED: ${AUTH_RATE_LIMIT_ENABLED:-true}
+      AUTH_RATE_LIMIT_CAPACITY: ${AUTH_RATE_LIMIT_CAPACITY:-100000}
+      # Inter-bank protokol — Banka 1 (Tim 1) base URL. Tim 1 izlaze
+      # nginx gateway na host portu 80. Iz nasi backend container-a
+      # pristupamo preko host.docker.internal alias-a (extra_hosts).
+      PARTNER1_BASE_URL: ${PARTNER1_BASE_URL:-http://host.docker.internal/}
+      # Tim 1 user info endpoint je rerouted na /interbank/user/{rn}/{id}.
+      PARTNER1_USER_PATH: ${PARTNER1_USER_PATH:-/interbank/user/{rn}/{id}}
+      # Tim 1 routing broj
+      PARTNER1_ROUTING: ${PARTNER1_ROUTING:-111}
     # host.docker.internal alias za pristup host portovima (Linux native Docker
     # zahteva eksplicitan host-gateway alias; Docker Desktop ima nativno).
     # Koristi se SAMO za opcioni Arbitro stack u Banka-2-Tools/docker-compose.yml
@@ -55,6 +144,46 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db_replica:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    # Healthcheck — `wget` je u eclipse-temurin:25-jre image-u (busybox).
+    # `/v3/api-docs` je openapi spec endpoint (dostupan bez auth-a po
+    # GlobalSecurityConfig.java) — vraca 200 OK kad je Spring kontekst
+    # potpuno load-ovan i Hibernate kreirao sve tabele. start_period
+    # daje 60s grace pre nego sto retries broji (Spring Boot boot ~30s).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v3/api-docs > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  # InfluxDB 2.x — time-series baza za berzanske OHLCV podatke (Open/High/Low/Close/Volume).
+  # Backend zapisuje tickove kao Point-ove u `tick-listings` bucket; FE chart cita
+  # OHLCV agregat preko Flux query-ja umesto iz PG `listing_daily_price_info` tabele.
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: banka2_influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_ADMIN_USER:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD:-admin12345}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG:-banka2}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET:-tick-listings}
+      DOCKER_INFLUXDB_INIT_RETENTION: 90d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-dev-token-change-me-32-bytes-minimum}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    ports:
+      - "8086:8086"
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Seed data — ceka backend da kreira tabele pa ubaci podatke
   seed:
@@ -68,19 +197,19 @@ services:
       - sh
       - -c
       - |
-        echo 'Cekam da backend kreira tabele...'
-        sleep 40
-        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-          psql -h db -U banka2user -d banka2 -c 'SELECT 1 FROM users LIMIT 1' >/dev/null 2>&1 && break
-          echo "Pokusaj $$i - tabele jos nisu kreirane, cekam..."
-          sleep 10
-        done
-        sleep 5
-        echo 'Ubacujem seed podatke...'
+        echo 'Backend je healthy (kreirao tabele) — ubacujem seed...'
         psql -h db -U banka2user -d banka2 -v ON_ERROR_STOP=1 -f /seed.sql
         echo 'Seed uspesno ubasen!'
     depends_on:
-      - backend
+      backend:
+        # service_healthy ceka backend healthcheck → 200 OK na /v3/api-docs.
+        # Ranije je seed imao `sleep 40` + 15× retry petlju da pogadja kad su
+        # tabele kreirane; sad je determinisicki — pokrece se TEK kad backend
+        # potvrdi da je load-ovan.
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  postgres_replica_data:
+  influxdb_data:
+  influxdb_config:

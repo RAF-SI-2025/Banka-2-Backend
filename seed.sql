@@ -263,14 +263,14 @@ VALUES
 -- ============================================================
 
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (1, 'TechStar DOO', '12345678', '123456789', '62.01',
      'Bulevar Mihajla Pupina 10, Novi Beograd',
-     NULL, 1, 0, NOW()),
+     NULL, 1, 0, 0, NOW()),
     (2, 'Green Food AD', '87654321', '987654321', '10.10',
      'Industrijska zona bb, Subotica',
-     NULL, 1, 0, NOW());
+     NULL, 1, 0, 0, NOW());
 
 -- ============================================================
 -- AUTHORIZED PERSONS (ovlascena lica za firme)
@@ -329,7 +329,13 @@ VALUES
      3000.0000, 28000.0000,
      255.0000, '2031-03-15', 'ACTIVE', 'Lični račun', NOW()),
 
-    ('222000112345678914', 'BUSINESS', 'STANDARD', 8, 2, 1, 2,
+    -- Poslovni racun MORA imati samo company_id, ne client_id (Account
+    -- ima @AssertTrue isOwnerValid() XOR validaciju). Milica je
+    -- AuthorizedPerson preko `authorized_persons` tabele, ne direktan
+    -- vlasnik. Bag prijavljen 10.05.2026 vece-3 — pre fix-a, svaki update
+    -- ovog racuna je pucao sa "Racun mora imati vlasnika: ili klijenta
+    -- ili kompaniju, ali ne oba".
+    ('222000112345678914', 'BUSINESS', 'STANDARD', 8, NULL, 1, 2,
      1250000.0000, 1230000.0000,
      1000000.0000, 5000000.0000,
      20000.0000, 350000.0000,
@@ -392,21 +398,23 @@ VALUES
 -- kao placeholder jer je to banka u vlasnistvu... Alternativa: kreiramo posebnu
 -- firmu "Banka 2025" kao company.
 
--- Prvo kreiramo firmu za banku
+-- Prvo kreiramo firmu za banku (is_bank=1, is_state=0 — Celina 2 §73-78
+-- "Nasa Banka = Firma" ima poseban status u sistemu)
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (3, 'Banka 2025 Tim 2', '22200022', '222000222', '64.19',
      'Bulevar Kralja Aleksandra 73, Beograd',
-     NULL, 1, 0, NOW());
+     NULL, 1, 0, 1, NOW());
 
--- Država (Republika Srbija) — poseban entitet za uplatu poreza
+-- Drzava (Republika Srbija, is_state=1) — poseban entitet za uplatu poreza,
+-- Celina 3 §47 "naša država = Firma" sa RSD racunom za porez na dobit.
 INSERT INTO companies (id, name, registration_number, tax_number, activity_code, address,
-                       majority_owner_id, active, is_state, created_at)
+                       majority_owner_id, active, is_state, is_bank, created_at)
 VALUES
     (4, 'Republika Srbija', '17858459', '100002288', '84.11',
      'Nemanjina 11, Beograd',
-     NULL, 1, 1, NOW());
+     NULL, 1, 1, 0, NOW());
 
 -- Bankini racuni u svim valutama
 INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
@@ -2554,3 +2562,302 @@ WHERE f.name = 'Banka 2 Tech Growth'
         AND p.user_id = (SELECT id FROM clients WHERE email = 'banka2.doo@banka.rs')
         AND p.user_role = 'CLIENT'
   );
+
+-- 5) Hartije fondova (FUND portfolio entries) — Celina 4 spec:
+--    "Svaki fond ima svoje investicije (hartije od vrednosti) i likvidnost".
+--    InvestmentFundService.getFundDetails cita portfolios.findByUserIdAndUserRole(fund.id, 'FUND')
+--    da bi vratio holdings tabelu na FE Detaljnom prikazu fonda.
+
+-- "Banka 2 Stable Income" — konzervativan: blue-chip akcije
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 100, 180.5000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Stable Income' AND l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 50, 370.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Stable Income' AND l.ticker = 'MSFT'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 40, 155.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Stable Income' AND l.ticker = 'GOOG'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+-- "Banka 2 Tech Growth" — agresivan: tech-heavy
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 200, 185.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Tech Growth' AND l.ticker = 'AAPL'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 50, 450.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Tech Growth' AND l.ticker = 'NVDA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 25, 310.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Tech Growth' AND l.ticker = 'META'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type, quantity, average_buy_price, public_quantity, last_modified)
+SELECT f.id, 'FUND', l.id, l.ticker, l.name, 'STOCK', 40, 200.0000, 0, NOW()
+FROM investment_funds f, listings l
+WHERE f.name = 'Banka 2 Tech Growth' AND l.ticker = 'TSLA'
+AND NOT EXISTS (SELECT 1 FROM portfolios p WHERE p.user_id = f.id AND p.user_role = 'FUND' AND p.listing_id = l.id);
+
+-- 6) Istorijski snapshot-i vrednosti fondova — Celina 4 spec:
+--    "Performanse fonda: tabela ili grafikon (mesecni/kvartalni/godisnji prikaz)"
+--    "treba da pratite performanse fonda -> belezite istorijske podatke"
+--
+--    FundValueSnapshotScheduler pravi dnevne snapshot-e u 23:45, ali za novi
+--    stack istorija je prazna pa graf "Performanse fonda" pokazuje 1 tacku.
+--    Ovde backfill-ujemo dnevne snapshot-e od inception_date do juce sa
+--    realisticnim fluktuacijama oko trenutne vrednosti (sine wave + random).
+--    "Banka 2 Stable Income" (konzervativan): range ~490M-510M, fluktuacija ~0.5%
+--    "Banka 2 Tech Growth" (agresivan): range ~470M-530M, fluktuacija ~2%
+INSERT INTO fund_value_snapshots (fund_id, snapshot_date, fund_value, liquid_amount, invested_total, profit)
+SELECT f.id, gs::date,
+       (500000000 + 10000000 * sin((gs::date - f.inception_date)::float / 14)
+                  + 2500000 * (random() - 0.5))::decimal(19,4),
+       (500000000 + 10000000 * sin((gs::date - f.inception_date)::float / 14)
+                  + 2500000 * (random() - 0.5))::decimal(19,4),
+       250000.0000,
+       (500000000 + 10000000 * sin((gs::date - f.inception_date)::float / 14)
+                  + 2500000 * (random() - 0.5) - 250000)::decimal(19,4)
+FROM investment_funds f,
+     LATERAL generate_series(f.inception_date, CURRENT_DATE - INTERVAL '1 day', '1 day'::interval) AS gs
+WHERE f.name = 'Banka 2 Stable Income'
+  AND NOT EXISTS (SELECT 1 FROM fund_value_snapshots s WHERE s.fund_id = f.id AND s.snapshot_date = gs::date);
+
+INSERT INTO fund_value_snapshots (fund_id, snapshot_date, fund_value, liquid_amount, invested_total, profit)
+SELECT f.id, gs::date,
+       (500000000 + 25000000 * sin((gs::date - f.inception_date)::float / 10)
+                  + 10000000 * (random() - 0.5))::decimal(19,4),
+       (500000000 + 25000000 * sin((gs::date - f.inception_date)::float / 10)
+                  + 10000000 * (random() - 0.5))::decimal(19,4),
+       500000.0000,
+       (500000000 + 25000000 * sin((gs::date - f.inception_date)::float / 10)
+                  + 10000000 * (random() - 0.5) - 500000)::decimal(19,4)
+FROM investment_funds f,
+     LATERAL generate_series(f.inception_date, CURRENT_DATE - INTERVAL '1 day', '1 day'::interval) AS gs
+WHERE f.name = 'Banka 2 Tech Growth'
+  AND NOT EXISTS (SELECT 1 FROM fund_value_snapshots s WHERE s.fund_id = f.id AND s.snapshot_date = gs::date);
+
+-- ============================================================
+-- INTER-BANK HANDSHAKE TEST SEED (Celina 5 — Tim 1 / Tim 2 razmena)
+-- ============================================================
+-- Dodatni racuni i klijent za inter-bank protokol handshake test
+-- sa Tim 1. Dodato 11.05.2026 posle dogovora sa Aleksom (Tim 1 BE).
+--
+-- Sta omogucava:
+-- 1) Stefan + Milica + Ana dobijaju USD racune — da mogu primati
+--    premium u USD od inter-bank kupca u OTC accept flow-u
+--    (OtcNegotiationService.resolveLocalAccount trazi seller-ov
+--    racun u valuti premium-a; bez USD racuna kupac iz Banka 1
+--    ne bi mogao da plati premium za AAPL/MSFT koji su u USD-u).
+-- 2) Novi klijent C-7 "Mile Interbank" sa svim 4 valutama
+--    (RSD/EUR/USD/CHF) — dedicated test target za Tim 1 handshake
+--    skripte. Iznosi po valuti dovoljni za sve 15 scenarija.
+-- 3) Stefan dodaje 8 javnih AAPL akcija (pored postojecih 10 MSFT)
+--    da Tim 1 ima vise scenarija u GET /public-stock odgovoru
+--    (multi-seller per ticker).
+-- ============================================================
+
+-- 1) Stefan USD racun (account_id ce biti auto-generisan, ne
+--    konflikira sa explicit-ID-evima 1-22 jer sequence se resetuje)
+INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
+                      client_id, company_id, employee_id,
+                      balance, available_balance,
+                      daily_limit, monthly_limit,
+                      daily_spending, monthly_spending,
+                      maintenance_fee, expiration_date, status, name, created_at)
+VALUES
+    -- Stefan USD: 2500 USD pocetno stanje, za primanje premium-a od Tim 1 kupca
+    ('222000131234567811', 'FOREIGN', 'STANDARD', 3, 1, NULL, 1,
+     2500.0000, 2500.0000, 5000.0000, 50000.0000,
+     0.0000, 0.0000, 0.0000, '2030-01-01', 'ACTIVE', 'Stefan USD', NOW()),
+    -- Milica USD: 1800 USD pocetno, isto pravilo
+    ('222000131234567812', 'FOREIGN', 'STANDARD', 3, 2, NULL, 1,
+     1800.0000, 1800.0000, 5000.0000, 50000.0000,
+     0.0000, 0.0000, 0.0000, '2030-01-01', 'ACTIVE', 'Milica USD', NOW()),
+    -- Ana USD: 950 USD pocetno
+    ('222000131234567813', 'FOREIGN', 'STANDARD', 3, 4, NULL, 1,
+     950.0000, 950.0000, 5000.0000, 50000.0000,
+     0.0000, 0.0000, 0.0000, '2030-01-01', 'ACTIVE', 'Ana USD', NOW());
+
+-- 2) Mile Interbank — dedicated handshake test klijent (C-7)
+INSERT INTO clients (first_name, last_name, date_of_birth, gender, email, phone, address,
+                     password, salt_password, active, created_at)
+SELECT 'Mile', 'Interbank', '1992-03-20', 'M', 'mile.interbank@banka.rs',
+       '+381 65 777 8899', 'Inter-Bank Test 1, Beograd',
+       '$2b$10$FUjcSzK7CZKeX53YVU4JjeOIXLt5axbipO85OlQqw5Dopg47zfgRG',
+       'c2VlZF9pbnRlcmJhbmtf', 1, NOW()
+WHERE NOT EXISTS (
+    SELECT 1 FROM clients WHERE email = 'mile.interbank@banka.rs'
+);
+
+-- 3) Mile Interbank racuni — sve 4 osnovne valute, visoki balance-ovi
+--    Tim 1 koristi `222000177777777XXX` prefix za njega da bude
+--    lako prepoznatljiv u test scriptama.
+INSERT INTO accounts (account_number, account_type, account_subtype, currency_id,
+                      client_id, company_id, employee_id,
+                      balance, available_balance,
+                      daily_limit, monthly_limit,
+                      daily_spending, monthly_spending,
+                      maintenance_fee, expiration_date, status, name, created_at)
+SELECT acc.account_number, acc.account_type, acc.account_subtype, acc.currency_id,
+       c.id, NULL, 1,
+       acc.balance, acc.balance,
+       acc.daily_limit, acc.monthly_limit,
+       0.0000, 0.0000, 0.0000, '2030-01-01', 'ACTIVE', acc.name, NOW()
+FROM clients c
+CROSS JOIN (VALUES
+    ('222000177777777811', 'CHECKING', 'STANDARD', 8, 5000000.0000, 1000000.0000, 10000000.0000, 'Mile Interbank RSD'),
+    ('222000177777777821', 'FOREIGN',  'STANDARD', 1,   50000.0000,   10000.0000,   100000.0000, 'Mile Interbank EUR'),
+    ('222000177777777831', 'FOREIGN',  'STANDARD', 3,   50000.0000,   10000.0000,   100000.0000, 'Mile Interbank USD'),
+    ('222000177777777841', 'FOREIGN',  'STANDARD', 2,   50000.0000,   10000.0000,   100000.0000, 'Mile Interbank CHF')
+) AS acc(account_number, account_type, account_subtype, currency_id, balance, daily_limit, monthly_limit, name)
+WHERE c.email = 'mile.interbank@banka.rs'
+  AND NOT EXISTS (
+      SELECT 1 FROM accounts WHERE account_number = acc.account_number
+  );
+
+-- 4) Mile Interbank javna portfolio pozicija — AAPL 100 sa public 25.
+--    Tim 1 moze da inicira /negotiations gde je Mile seller, sto je
+--    cleaner test od koriscenja Stefan (koji je takodje FE test klijent
+--    sa svojim postojecim ugovorima).
+INSERT INTO portfolios (user_id, user_role, listing_id, listing_ticker, listing_name, listing_type,
+                        quantity, average_buy_price, public_quantity, last_modified)
+SELECT c.id, 'CLIENT', l.id, l.ticker, l.name, 'STOCK', 100, 175.0000, 25, NOW()
+FROM clients c, listings l
+WHERE c.email = 'mile.interbank@banka.rs'
+  AND l.ticker = 'AAPL'
+  AND NOT EXISTS (
+      SELECT 1 FROM portfolios p
+      WHERE p.user_id = c.id AND p.user_role = 'CLIENT' AND p.listing_id = l.id
+  );
+
+-- 5) Stefan dobija AAPL javne — pored MSFT 10 public, sad i AAPL 8 public.
+--    Daje Tim 1 multi-ticker, multi-seller test scenarije (GET /public-stock
+--    sad vraca AAPL od dva sellera: C-1 Stefan + C-4 Ana + C-7 Mile).
+UPDATE portfolios SET public_quantity = 8, last_modified = NOW()
+WHERE user_id = 1 AND user_role = 'CLIENT' AND listing_ticker = 'AAPL';
+
+-- ============================================================
+-- SEQUENCE RESET — posle eksplicitnih ID INSERT-ova, sequence
+-- mora da se sinhronizuje sa MAX(id) iz svake tabele, inace
+-- sledeci Hibernate auto-generated INSERT pokusava ID koji
+-- vec postoji (companies/currencies imaju eksplicitne ID-eve).
+-- Bag prijavljen 10.05.2026 vece-2 (C2 Sc 4).
+-- ============================================================
+
+SELECT setval('companies_id_seq', (SELECT COALESCE(MAX(id), 1) FROM companies));
+SELECT setval('currencies_id_seq', (SELECT COALESCE(MAX(id), 1) FROM currencies));
+
+-- ============================================================
+-- STEDNJA (Celina 2 nadogradnja) — kamatne stope + demo deposits
+-- ============================================================
+
+-- 8 valuta x 5 rokova = 40 stopa (RSD/EUR/USD/CHF/GBP/CAD/AUD/JPY x 3/6/12/24/36 meseci)
+-- RSD: 2.5-5.0%, EUR/USD: 1.5-4.0%, CHF: 1.0-2.0%, GBP: 1.75-3.25%,
+-- CAD: 1.5-3.0%, AUD: 1.75-3.25%, JPY: 0.5-2.5%
+
+INSERT INTO savings_interest_rates (currency_id, term_months, annual_rate, active, effective_from, created_at) VALUES
+  ((SELECT id FROM currencies WHERE code='RSD'),  3, 2.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='RSD'),  6, 3.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='RSD'), 12, 4.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='RSD'), 24, 4.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='RSD'), 36, 5.00, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='EUR'),  3, 1.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='EUR'),  6, 2.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='EUR'), 12, 2.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='EUR'), 24, 3.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='EUR'), 36, 3.50, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='USD'),  3, 2.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='USD'),  6, 2.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='USD'), 12, 3.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='USD'), 24, 3.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='USD'), 36, 4.00, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='CHF'),  3, 1.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CHF'),  6, 1.25, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CHF'), 12, 1.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CHF'), 24, 1.75, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CHF'), 36, 2.00, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='GBP'),  3, 1.75, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='GBP'),  6, 2.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='GBP'), 12, 2.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='GBP'), 24, 3.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='GBP'), 36, 3.25, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='CAD'),  3, 1.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CAD'),  6, 1.75, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CAD'), 12, 2.25, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CAD'), 24, 2.75, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='CAD'), 36, 3.00, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='AUD'),  3, 1.75, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='AUD'),  6, 2.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='AUD'), 12, 2.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='AUD'), 24, 3.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='AUD'), 36, 3.25, 1, '2026-01-01', NOW()),
+
+  ((SELECT id FROM currencies WHERE code='JPY'),  3, 0.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='JPY'),  6, 1.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='JPY'), 12, 1.50, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='JPY'), 24, 2.00, 1, '2026-01-01', NOW()),
+  ((SELECT id FROM currencies WHERE code='JPY'), 36, 2.50, 1, '2026-01-01', NOW());
+
+SELECT setval('savings_interest_rates_id_seq', (SELECT COALESCE(MAX(id), 1) FROM savings_interest_rates));
+
+-- Demo deposit-i za seedovane klijente:
+-- Stefan (client_id=1): 200,000 RSD na 12 meseci, autoRenew=true, otvoren 2 meseca pre, vec 2 isplate kamate
+--   linked_account: prvi aktivni RSD racun Stefana (account_number=222000112345678911)
+-- Milica (client_id=2): 1,000 EUR na 6 meseci, autoRenew=false, otvoren 1 mesec pre, 1 isplata kamate
+--   linked_account: prvi aktivni EUR racun Milice (account_number=222000121345678923)
+-- Koristimo subquery umesto hard-coded account.id jer accounts tabela nema eksplicitne ID-eve u seed-u.
+
+INSERT INTO savings_deposits (
+    client_id, linked_account_id, principal_amount, currency_id, term_months,
+    annual_interest_rate, start_date, maturity_date, next_interest_payment_date,
+    total_interest_paid, auto_renew, status, version, created_at, updated_at
+) VALUES
+  (1,
+   (SELECT id FROM accounts WHERE client_id=1 AND currency_id=(SELECT id FROM currencies WHERE code='RSD') AND status='ACTIVE' ORDER BY id LIMIT 1),
+   200000.0000, (SELECT id FROM currencies WHERE code='RSD'), 12,
+   4.00, '2026-03-12', '2027-03-12', '2026-06-12',
+   1333.3333, 1, 'ACTIVE', 0, NOW(), NOW()),
+  (2,
+   (SELECT id FROM accounts WHERE client_id=2 AND currency_id=(SELECT id FROM currencies WHERE code='EUR') AND status='ACTIVE' ORDER BY id LIMIT 1),
+   1000.0000, (SELECT id FROM currencies WHERE code='EUR'), 6,
+   2.00, '2026-04-12', '2026-10-12', '2026-06-12',
+   1.6667, 0, 'ACTIVE', 0, NOW(), NOW());
+
+SELECT setval('savings_deposits_id_seq', (SELECT COALESCE(MAX(id), 1) FROM savings_deposits));
+
+-- Istorija transakcija za demo deposit-e
+-- deposit_id=1 = Stefanov RSD deposit, deposit_id=2 = Milicin EUR deposit
+-- (Ovi ID-evi su sigurni jer su ovo prvi INSERT-i u savings_deposits tabelu)
+INSERT INTO savings_transactions (deposit_id, type, amount, currency_id, processed_date, description, created_at) VALUES
+  (1, 'OPEN', 200000.0000, (SELECT id FROM currencies WHERE code='RSD'),
+   '2026-03-12', 'Otvaranje depozita rok=12m stopa=4.00% p.a.', '2026-03-12 09:00:00'),
+  (1, 'INTEREST_PAYMENT', 666.6667, (SELECT id FROM currencies WHERE code='RSD'),
+   '2026-04-12', 'Mesecna kamata depozita #1', '2026-04-12 02:00:00'),
+  (1, 'INTEREST_PAYMENT', 666.6667, (SELECT id FROM currencies WHERE code='RSD'),
+   '2026-05-12', 'Mesecna kamata depozita #1', '2026-05-12 02:00:00'),
+  (2, 'OPEN', 1000.0000, (SELECT id FROM currencies WHERE code='EUR'),
+   '2026-04-12', 'Otvaranje depozita rok=6m stopa=2.00% p.a.', '2026-04-12 10:30:00'),
+  (2, 'INTEREST_PAYMENT', 1.6667, (SELECT id FROM currencies WHERE code='EUR'),
+   '2026-05-12', 'Mesecna kamata depozita #2', '2026-05-12 02:00:00');
+
+SELECT setval('savings_transactions_id_seq', (SELECT COALESCE(MAX(id), 1) FROM savings_transactions));

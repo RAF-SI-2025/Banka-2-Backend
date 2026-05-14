@@ -5,5 +5,7 @@ public enum PaymentStatus {
     PROCESSING,
     COMPLETED,
     REJECTED,
-    CANCELLED
+    CANCELLED,
+    /** T2-012: placanje otkazano zbog 3 neuspela OTP unosa (audit trail). */
+    ABORTED
 }

@@ -1,0 +1,35 @@
+# Linux containers ucitavaju shell skripte i Dockerfile-ove pa CRLF (Windows)
+# pravi `bad interpreter: /bin/bash^M` greske kad je fajl checkout-ovan na
+# Windows masini sa core.autocrlf=true. Forsiramo LF za sve OS-ove kako bi
+# core.autocrlf konfiguracija pojedinacnih kontributora bila irelevantna.
+
+# Default: git auto-detektuje binary vs text
+* text=auto
+
+# Shell skripte i bootstrap fajlovi koji se izvrsavaju u Linux kontejnerima
+*.sh text eol=lf
+db-init/* text eol=lf
+db-replica-init/* text eol=lf
+
+# Dockerfile-ovi (build stage RUN linije idu kroz /bin/sh u Linux base image-u)
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+.dockerignore text eol=lf
+
+# Linux config fajlovi
+*.conf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows-specific (Maven wrapper batch)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

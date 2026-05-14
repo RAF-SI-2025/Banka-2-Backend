@@ -11,7 +11,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
@@ -69,14 +71,16 @@ public class CardController {
         return ResponseEntity.ok(cardService.blockCard(id));
     }
 
-    @Operation(summary = "Unblock card", description = "Employee unblocks a blocked card")
+    @Operation(summary = "Unblock card", description = "Employee unblocks a blocked card. Spec C2: klijent NE moze odblokirati, samo zaposleni.")
     @PatchMapping("/{id}/unblock")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
     public ResponseEntity<CardResponseDto> unblockCard(@PathVariable Long id) {
         return ResponseEntity.ok(cardService.unblockCard(id));
     }
 
     @Operation(summary = "Deactivate card", description = "Employee permanently deactivates a card")
     @PatchMapping("/{id}/deactivate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
     public ResponseEntity<CardResponseDto> deactivateCard(@PathVariable Long id) {
         return ResponseEntity.ok(cardService.deactivateCard(id));
     }
@@ -92,6 +96,7 @@ public class CardController {
     // ===== Card Requests (klijent podnosi zahtev, admin odobrava) =====
 
     @PostMapping("/requests")
+    @Transactional
     public ResponseEntity<Map<String, Object>> submitCardRequest(@RequestBody Map<String, Object> body) {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         Client client = clientRepository.findByEmail(email).orElse(null);
@@ -146,6 +151,8 @@ public class CardController {
     }
 
     @PatchMapping("/requests/{id}/approve")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
+    @Transactional
     public ResponseEntity<Map<String, Object>> approveCardRequest(@PathVariable Long id) {
         CardRequest req = cardRequestRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));
@@ -166,6 +173,8 @@ public class CardController {
     }
 
     @PatchMapping("/requests/{id}/reject")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
+    @Transactional
     public ResponseEntity<Map<String, Object>> rejectCardRequest(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
         CardRequest req = cardRequestRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Zahtev nije pronadjen"));

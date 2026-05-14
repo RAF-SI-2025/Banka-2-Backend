@@ -65,6 +65,28 @@ public final class InterbankExceptions {
     }
 
     /**
+     * §3.3 — PUT /negotiations/{rn}/{id} pozvan kad nije turn pozivaoca, ILI je
+     * pregovor vec zatvoren. Spec eksplicitno trazi HTTP 409 Conflict (ne 400),
+     * jer to nije malformed input — to je validan zahtev koji konflitkuje sa
+     * trenutnim stanjem resursa.
+     */
+    public static class InterbankNegotiationConflictException extends InterbankException {
+        public InterbankNegotiationConflictException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * §3.7 — GET /user/{rn}/{id} za nepostojeci ID. Spec trazi HTTP 404 Not Found
+     * (ne 400). Razlikujemo od ostalih protocol greska.
+     */
+    public static class InterbankUserNotFoundException extends InterbankException {
+        public InterbankUserNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * §2.2 — duplikat pri belezenju idempotence kljuca ili stale cached response.
      */
     public static class InterbankIdempotencyException extends InterbankException {

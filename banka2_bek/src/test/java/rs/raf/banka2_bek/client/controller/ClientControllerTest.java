@@ -220,7 +220,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients - 200 OK paginated list")
     void getClients_returnsPaginatedList() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 10, null, null, null)).thenReturn(page);
+        when(clientService.getClients(0, 10, null, null, null, null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")
@@ -235,7 +235,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients?firstName=Petar - 200 OK filtered")
     void getClients_filteredByFirstName() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 10, "Petar", null, null)).thenReturn(page);
+        when(clientService.getClients(0, 10, "Petar", null, null, null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")
@@ -249,7 +249,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients?lastName=Petrovic - 200 OK filtered by last name")
     void getClients_filteredByLastName() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 10, null, "Petrovic", null)).thenReturn(page);
+        when(clientService.getClients(0, 10, null, "Petrovic", null, null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")
@@ -263,7 +263,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients?email=petar@test.com - 200 OK filtered by email")
     void getClients_filteredByEmail() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 10, null, null, "petar@test.com")).thenReturn(page);
+        when(clientService.getClients(0, 10, null, null, "petar@test.com", null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")
@@ -277,7 +277,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients - 200 OK empty page")
     void getClients_emptyPage() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(Collections.emptyList(), PageRequest.of(0, 10), 0);
-        when(clientService.getClients(0, 10, null, null, null)).thenReturn(page);
+        when(clientService.getClients(0, 10, null, null, null, null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")
@@ -290,7 +290,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients - default pagination when no params")
     void getClients_defaultPagination() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 10, null, null, null)).thenReturn(page);
+        when(clientService.getClients(0, 10, null, null, null, null)).thenReturn(page);
 
         mockMvc.perform(get("/clients"))
                 .andExpect(status().isOk())
@@ -301,7 +301,7 @@ class ClientControllerTest {
     @DisplayName("GET /clients with all filters - 200 OK")
     void getClients_allFilters() throws Exception {
         Page<ClientResponseDto> page = new PageImpl<>(List.of(testClient), PageRequest.of(0, 10), 1);
-        when(clientService.getClients(0, 5, "Petar", "Petrovic", "petar@test.com")).thenReturn(page);
+        when(clientService.getClients(0, 5, "Petar", "Petrovic", "petar@test.com", null)).thenReturn(page);
 
         mockMvc.perform(get("/clients")
                         .param("page", "0")

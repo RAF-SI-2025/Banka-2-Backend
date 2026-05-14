@@ -1,0 +1,50 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: banka2-dev
+    environment: docker-compose
+
+# Alert rules su u zasebnom fajlu da bi mogli zasebno da ih versionisemo.
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
+# AlertManager listener — Prometheus salje alert-e ovde, AlertManager dalje
+# rute-uje na Discord (kroz alert-router bridge).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Prometheus scrape-uje sebe (meta metrike o samom Prometheus-u).
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # Banka2 backend — Spring Boot Actuator + Micrometer Prometheus registry
+  # automatski publikuju standardne (JVM, HTTP, DB, cache) i custom poslovne
+  # metrike na /actuator/prometheus endpoint-u.
+  - job_name: banka2_backend
+    metrics_path: /actuator/prometheus
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - backend:8080
+        labels:
+          service: backend
+          tier: api
+
+  # AlertManager self-metrike.
+  - job_name: alertmanager
+    static_configs:
+      - targets:
+          - alertmanager:9093
+
+  # Grafana self-metrike.
+  - job_name: grafana
+    static_configs:
+      - targets:
+          - grafana:3000

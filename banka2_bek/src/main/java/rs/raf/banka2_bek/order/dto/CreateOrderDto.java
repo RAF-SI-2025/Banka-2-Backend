@@ -31,7 +31,12 @@ public class CreateOrderDto {
     private boolean allOrNone;      // AON flag
     private boolean margin;         // Margin flag
 
-    @NotNull(message = "ID racuna je obavezan")
+    /**
+     * Racun sa kog se skida novac (BUY) ili na koji se uplacuje (SELL).
+     * Required kada nije fund-trade. Kada je fundId != null, BE
+     * resolvuje racun preko fund.accountId pa je accountId opcioni.
+     * Validacija (XOR) se sprovodi u OrderServiceImpl.createOrder.
+     */
     private Long accountId;
 
     @NotBlank(message = "Verifikacioni kod je obavezan")

@@ -60,7 +60,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             + "LOWER(co.name) LIKE LOWER(CONCAT('%', cast(:ownerName as string), '%')))")
     Page<Account> findAllWithOwnerFilter(@Param("ownerName") String ownerName, Pageable pageable);
 
-    @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber")
+    // Sc 49 fix (T8-003): vraca SAMO BANK_TRADING racune banke, jer InvestmentFundService.ensureAccountCanBeUsed
+    // odbija sve ostale kategorije. FE supervizor flow ("Uplati u ime banke") prikazuje rezultat ove rute u
+    // FundInvestDialog dropdown-u — bez filtera korisnik vidi sve bankine racune ukljucujuci fund-specific
+    // i FX racune koje BE potom odbija sa AccessDeniedException.
+    @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber "
+            + "AND a.accountCategory = rs.raf.banka2_bek.account.model.AccountCategory.BANK_TRADING")
     List<Account> findBankAccounts(@Param("regNumber") String regNumber);
 
     @Query("SELECT a FROM Account a WHERE a.company.registrationNumber = :regNumber AND a.currency.id = :currencyId AND a.status = 'ACTIVE' ORDER BY a.id ASC")

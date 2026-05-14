@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.investmentFund.service;
+package rs.raf.banka2_bek.investmentfund.service;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,9 +10,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.investmentfund.model.ClientFundTransactionStatus;
+import rs.raf.banka2_bek.investmentfund.model.InvestmentFund;
+import rs.raf.banka2_bek.investmentfund.repository.InvestmentFundRepository;
 import rs.raf.banka2_bek.investmentfund.service.FundLiquidationService;
 import rs.raf.banka2_bek.order.model.Order;
 import rs.raf.banka2_bek.order.repository.OrderRepository;
+import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
@@ -37,6 +40,8 @@ class FundLiquidationServiceTest {
     @Mock private PortfolioRepository portfolioRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private ListingRepository listingRepository;
+    @Mock private InvestmentFundRepository investmentFundRepository;
+    @Mock private CurrencyConversionService currencyConversionService;
 
     @InjectMocks
     private FundLiquidationService fundLiquidationService;
@@ -62,12 +67,29 @@ class FundLiquidationServiceTest {
         listing.setBid(new BigDecimal("300.00"));
 
         Account dummyAccount = new Account();
+        dummyAccount.setId(99L);
         dummyAccount.setBalance(new BigDecimal("1000000"));
+
+        // Posle T8 merge-a, getFundAccount() koristi InvestmentFund.accountId resolve
+        // umesto da gleda BANK_TRADING fallback. Stub-ujemo InvestmentFund + Account
+        // pravim accountId-jem da matchira realan production putanja.
+        InvestmentFund mockFund = new InvestmentFund();
+        mockFund.setId(fundId);
+        mockFund.setAccountId(99L);
 
         lenient().when(portfolioRepository.findByUserIdAndUserRole(anyLong(), anyString())).thenReturn(List.of(p1, p2));
         lenient().when(listingRepository.findByTicker(anyString())).thenReturn(Optional.of(listing));
         lenient().when(listingRepository.findById(any())).thenReturn(Optional.of(listing));
-        lenient().when(accountRepository.findFirstByAccountCategoryAndCurrency_Code(any(), any())).thenReturn(Optional.of(dummyAccount));
+        lenient().when(investmentFundRepository.findById(eq(fundId))).thenReturn(Optional.of(mockFund));
+        lenient().when(accountRepository.findForUpdateById(eq(99L))).thenReturn(Optional.of(dummyAccount));
+        // Posto je hardkodovan FX 117 fallback uklonjen iz FundLiquidationService,
+        // currencyConversionService je obavezan @Mock. Ovaj test koristi listing
+        // bez set-ovane valute (ListingCurrencyResolver vraca "RSD" default), ali
+        // defensive lenient stub pokriva edge slucaj ako se setup promeni.
+        lenient().when(currencyConversionService.convert(any(), anyString(), anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(currencyConversionService.getRate(anyString(), anyString()))
+                .thenReturn(BigDecimal.ONE);
 
         fundLiquidationService.liquidateFor(fundId, amountToLiquidate);
 

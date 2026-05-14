@@ -12,49 +12,6 @@ import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import java.util.Optional;
 
 
-/*
-================================================================================
- TODO — INBOUND ENDPOINT ZA PORUKE OD DRUGIH BANAKA (PROTOKOL §2.11)
- Zaduzen: BE tim
- Spec ref: protokol §2.11 Sending messages, §2.10 Authentication,
-           §2.12 Message types
---------------------------------------------------------------------------------
- JEDINSTVENA TACKA ZA SVE INBOUND PORUKE (po protokolu):
-   POST /interbank
-   Content-Type: application/json
-   X-Api-Key: <token koji smo MI izdali toj banci>
-
- STATUSI ODGOVORA (§2.11):
-   202 Accepted — primljeno ali jos neobradeno; pošiljač retry-uje
-   200 OK       — primljeno + zavrseno; body = response (npr. TransactionVote
-                  za NEW_TX)
-   204 No Content — primljeno + zavrseno bez tela
-   401 — los X-Api-Key
-   400 — malformed envelope
-   500 — internal errors
-
- AUTHENTICATION (§2.10):
-   - Procitaj X-Api-Key header
-   - Provera u BankRoutingService da postoji partner sa tim inboundToken-om
-   - Dodatno: envelope.idempotenceKey.routingNumber MORA biti routingNumber
-     tog partnera (sprecava CSRF iz druge banke)
-
- IDEMPOTENCY (§2.2):
-   - InterbankMessageService.findCachedResponse(envelope.idempotenceKey)
-   - Ako postoji: vrati cached response sa istim httpStatus-om (200/204)
-   - Ako ne: izvrsi handler, pa pozovi recordInboundResponse atomicno
-
- DISPATCH PO TIPU (§2.12):
-   NEW_TX      -> TransactionExecutorService.handleNewTx → vrati TransactionVote (200)
-   COMMIT_TX   -> TransactionExecutorService.handleCommitTx → 204
-   ROLLBACK_TX -> TransactionExecutorService.handleRollbackTx → 204
-
- NAPOMENA:
-   Endpoint-ovi za public-stock, /negotiations/* i /user/* idu u
-   OtcNegotiationController (§3.1-3.7), NE ovde. Ovaj kontroler je samo
-   za §2 Transaction execution protocol.
-================================================================================
-*/
 @RestController
 @RequestMapping("/interbank")
 @RequiredArgsConstructor
@@ -79,36 +36,61 @@ public class InterbankInboundController {
     @PostMapping
     public ResponseEntity<Object> receiveMessage(
             @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
-            @RequestBody String rawBody) throws Exception {
+            @RequestBody String rawBody) {
 
-        if (apiKey == null || apiKey.isBlank()) return ResponseEntity.status(401).build();
+        try {
+            if (apiKey == null || apiKey.isBlank()) {
+                return ResponseEntity.status(401).build();
+            }
 
-        Optional<InterbankProperties.PartnerBank> partnerBankOpt = properties.getPartners()
-                .stream()
-                .filter(partner -> partner.getInboundToken().equals(apiKey))
-                .findFirst();
+            Optional<InterbankProperties.PartnerBank> partnerBankOpt = properties.getPartners()
+                    .stream()
+                    .filter(partner -> apiKey.equals(partner.getInboundToken()))
+                    .findFirst();
 
-        if (partnerBankOpt.isEmpty()) return ResponseEntity.status(401).build();
+            if (partnerBankOpt.isEmpty()) {
+                return ResponseEntity.status(401).build();
+            }
 
-        InterbankProperties.PartnerBank partnerBank = partnerBankOpt.get();
+            InterbankProperties.PartnerBank partnerBank = partnerBankOpt.get();
 
-        JsonNode envelope = objectMapper.readTree(rawBody);
-        IdempotenceKey idempotenceKey = objectMapper.convertValue(envelope.get("idempotenceKey"), IdempotenceKey.class);
-        MessageType messageType = objectMapper.convertValue(envelope.get("messageType"), MessageType.class);
-        JsonNode messageNode = envelope.get("message");
+            JsonNode envelope = objectMapper.readTree(rawBody);
 
-        if (idempotenceKey.routingNumber() != partnerBank.getRoutingNumber())
-            return ResponseEntity.status(401).build();
+            if (!envelope.hasNonNull("idempotenceKey")
+                    || !envelope.hasNonNull("messageType")
+                    || !envelope.hasNonNull("message")) {
+                return ResponseEntity.badRequest().build();
+            }
 
-        Optional<String> cashedOpt = interbankMessageService.findCachedResponse(idempotenceKey);
-        if (cashedOpt.isEmpty())
+            IdempotenceKey idempotenceKey =
+                    objectMapper.convertValue(envelope.get("idempotenceKey"), IdempotenceKey.class);
+            MessageType messageType =
+                    objectMapper.convertValue(envelope.get("messageType"), MessageType.class);
+            JsonNode messageNode = envelope.get("message");
+
+            if (idempotenceKey.routingNumber() != partnerBank.getRoutingNumber()) {
+                return ResponseEntity.status(401).build();
+            }
+
+            Optional<String> cachedResponseOpt = interbankMessageService.findCachedResponse(idempotenceKey);
+
+            if (cachedResponseOpt.isPresent()) {
+                String cachedResponse = cachedResponseOpt.get();
+
+                if (cachedResponse == null || cachedResponse.isBlank()) {
+                    return ResponseEntity.noContent().build();
+                }
+
+                return ResponseEntity.ok(objectMapper.readTree(cachedResponse));
+            }
+
             return dispatchByMessageType(messageType, idempotenceKey, messageNode);
 
-        if (!cashedOpt.get().isBlank())
-            return ResponseEntity.ok(objectMapper.readTree(cashedOpt.get()));
-
-        return ResponseEntity.noContent().build();
-
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
     }
 
     private ResponseEntity<Object> dispatchByMessageType(

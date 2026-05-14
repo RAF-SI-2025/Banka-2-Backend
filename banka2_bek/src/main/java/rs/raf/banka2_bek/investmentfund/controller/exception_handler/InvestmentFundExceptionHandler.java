@@ -3,9 +3,12 @@ package rs.raf.banka2_bek.investmentfund.controller.exception_handler;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import rs.raf.banka2_bek.investmentfund.controller.InvestmentFundController;
+import rs.raf.banka2_bek.order.exception.InsufficientFundsException;
+import rs.raf.banka2_bek.order.exception.UnsupportedCurrencyException;
 
 import java.util.Map;
 
@@ -23,6 +26,27 @@ public class InvestmentFundExceptionHandler {
     public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<Map<String, String>> handleInsufficientFunds(InsufficientFundsException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(UnsupportedCurrencyException.class)
+    public ResponseEntity<Map<String, String>> handleUnsupportedCurrency(UnsupportedCurrencyException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
                 .body(Map.of("message", ex.getMessage()));
     }
 

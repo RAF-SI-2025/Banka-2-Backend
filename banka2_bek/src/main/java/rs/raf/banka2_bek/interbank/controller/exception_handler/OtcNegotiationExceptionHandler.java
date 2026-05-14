@@ -28,6 +28,20 @@ public class OtcNegotiationExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 
+    /** §3.3 — turn violation ili zatvoreni pregovor -> 409 Conflict. */
+    @ExceptionHandler(InterbankExceptions.InterbankNegotiationConflictException.class)
+    public ResponseEntity<Map<String, String>> handleNegotiationConflict(
+            InterbankExceptions.InterbankNegotiationConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
+    }
+
+    /** §3.7 — nepostojeci user ID -> 404 Not Found. */
+    @ExceptionHandler(InterbankExceptions.InterbankUserNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleUserNotFound(
+            InterbankExceptions.InterbankUserNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
     @ExceptionHandler(InterbankExceptions.InterbankIdempotencyException.class)
     public ResponseEntity<Map<String, String>> handleIdempotency(InterbankExceptions.InterbankIdempotencyException ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", ex.getMessage()));

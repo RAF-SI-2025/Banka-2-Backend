@@ -122,22 +122,28 @@ class EmployeeServiceImplTest {
     }
 
     @Test
-    void updateEmployeeRejectsEmailConflict() {
+    void updateEmployeeRejectsEmailChange() {
+        // Bug T1-010 (12.05.2026): pre fix-a BE je dozvoljavao izmenu email-a
+        // i samo proveravao da li je email vec zauzet od drugog naloga (dup
+        // check). Sad email se NE moze menjati uopste (read-only po Plan_
+        // Manuelnog_Testiranja + security best practice — email je identitet
+        // naloga). Test sad proverava da pokusaj postavljanja drugacijeg
+        // email-a baca exception sa porukom o read-only ponasanju.
         Employee employee = Employee.builder()
                 .id(2L)
+                .email("original@test.com")
                 .permissions(Set.of("VIEW_STOCKS"))
                 .active(true)
                 .build();
 
         when(employeeRepository.findById(2L)).thenReturn(Optional.of(employee));
-        when(employeeRepository.existsByEmailAndIdNot("dup@test.com", 2L)).thenReturn(true);
 
         UpdateEmployeeRequestDto request = new UpdateEmployeeRequestDto();
         request.setEmail("dup@test.com");
 
         assertThatThrownBy(() -> employeeService.updateEmployee(2L, request))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("email");
+                .hasMessageContaining("Email zaposlenog se ne moze menjati");
     }
 
     @Test

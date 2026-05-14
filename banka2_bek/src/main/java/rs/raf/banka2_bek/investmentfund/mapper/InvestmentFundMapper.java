@@ -28,6 +28,7 @@ public final class InvestmentFundMapper {
                 account.getBalance(),
                 profit,
                 fund.getMinimumContribution(),
+                account.getId(),
                 account.getAccountNumber(),
                 holdings,
                 performance,

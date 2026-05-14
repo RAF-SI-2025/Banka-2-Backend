@@ -10,6 +10,7 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import rs.raf.banka2_bek.auth.service.CustomUserDetailsService;
+import rs.raf.banka2_bek.auth.service.JwtBlacklistService;
 import rs.raf.banka2_bek.auth.service.JwtService;
 import org.springframework.security.core.userdetails.UserDetails;
 
@@ -20,10 +21,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final CustomUserDetailsService userDetailsService;
+    private final JwtBlacklistService blacklistService;
 
-    public JwtAuthenticationFilter(JwtService jwtService, CustomUserDetailsService userDetailsService) {
+    public JwtAuthenticationFilter(JwtService jwtService,
+                                   CustomUserDetailsService userDetailsService,
+                                   JwtBlacklistService blacklistService) {
         this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
+        this.blacklistService = blacklistService;
     }
 
     @Override
@@ -39,6 +44,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String token = authHeader.substring(7);
+
+        // Opciono.1 — odbaci blacklisted (logged-out) tokene pre signature check-a.
+        if (blacklistService.isBlacklisted(token)) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return;
+        }
 
         try {
             String email = jwtService.extractEmail(token);

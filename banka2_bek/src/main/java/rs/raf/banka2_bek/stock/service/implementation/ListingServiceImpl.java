@@ -3,6 +3,7 @@ package rs.raf.banka2_bek.stock.service.implementation;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -26,12 +27,14 @@ import rs.raf.banka2_bek.stock.repository.ListingDailyPriceInfoRepository;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.repository.ListingSpec;
 import rs.raf.banka2_bek.stock.service.ListingService;
+import rs.raf.banka2_bek.timeseries.ListingPriceRecorder;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -53,6 +56,7 @@ public class ListingServiceImpl implements ListingService {
     private final RestTemplate restTemplate;
     private final ExchangeService exchangeService;
     private final ExchangeRepository exchangeRepository;
+    private final ObjectProvider<ListingPriceRecorder> priceRecorderProvider;
 
     @Value("${stock.api.keys:demo}")
     private String stockApiKeys;
@@ -297,6 +301,29 @@ public class ListingServiceImpl implements ListingService {
 
             // Save daily price snapshot for history chart
             saveDailyPriceSnapshot(listing, newPrice, newAsk, newBid, priceChange, newVolume);
+
+            // Time-series tick u InfluxDB. ObjectProvider gracefuly vraca null
+            // ako banka2.influx.enabled=false (BE i dalje radi bez Influx-a).
+            // Null check za testove koji konstrukcijom rucnim ne prosledjuju provider.
+            ListingPriceRecorder recorder = priceRecorderProvider != null
+                    ? priceRecorderProvider.getIfAvailable() : null;
+            if (recorder != null) {
+                BigDecimal high = currentPrice.max(newPrice);
+                BigDecimal low  = currentPrice.min(newPrice);
+                recorder.recordTick(
+                        listing.getTicker(),
+                        listing.getExchangeAcronym(),
+                        listing.getListingType() != null ? listing.getListingType().name() : "STOCK",
+                        currentPrice,
+                        high,
+                        low,
+                        newPrice,
+                        newVolume,
+                        newAsk,
+                        newBid,
+                        Instant.now()
+                );
+            }
         }
 
         listingRepository.saveAll(listings);

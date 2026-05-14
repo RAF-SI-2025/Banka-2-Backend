@@ -9,6 +9,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import rs.raf.banka2_bek.account.model.Account;
+import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.auth.dto.AuthResponseDto;
 import rs.raf.banka2_bek.auth.dto.LoginRequestDto;
 import rs.raf.banka2_bek.auth.dto.PasswordResetDto;
@@ -21,11 +23,16 @@ import rs.raf.banka2_bek.auth.model.PasswordResetToken;
 import rs.raf.banka2_bek.auth.model.User;
 import rs.raf.banka2_bek.auth.repository.PasswordResetTokenRepository;
 import rs.raf.banka2_bek.auth.repository.UserRepository;
+import rs.raf.banka2_bek.client.model.Client;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.currency.model.Currency;
+import rs.raf.banka2_bek.currency.repository.CurrencyRepository;
 import rs.raf.banka2_bek.employee.model.Employee;
 import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -46,6 +53,15 @@ class AuthServiceTest {
     private EmployeeRepository employeeRepository;
 
     @Mock
+    private ClientRepository clientRepository;
+
+    @Mock
+    private AccountRepository accountRepository;
+
+    @Mock
+    private CurrencyRepository currencyRepository;
+
+    @Mock
     private PasswordResetTokenRepository passwordResetTokenRepository;
 
     @Mock
@@ -56,6 +72,9 @@ class AuthServiceTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private AccountLockoutService accountLockoutService;
 
     @InjectMocks
     private AuthService authService;
@@ -173,7 +192,7 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(new LoginRequestDto("missing@test.com", "bad")))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Invalid email or password");
+                .hasMessageContaining("Neispravan email ili lozinka");
     }
 
     // ===== Employee login with salt-based password hashing =====
@@ -204,7 +223,7 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(new LoginRequestDto(employee.getEmail(), "wrongPass")))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Invalid email or password");
+                .hasMessageContaining("Neispravan email ili lozinka");
     }
 
     // ===== Login with inactive account =====
@@ -234,7 +253,7 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(new LoginRequestDto("inactive-emp@test.com", "password")))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Employee account is not active");
+                .hasMessageContaining("Nalog je deaktiviran");
     }
 
     @Test
@@ -252,7 +271,7 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(new LoginRequestDto("inactive@test.com", "password")))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("User account is not active");
+                .hasMessageContaining("Nalog je deaktiviran");
     }
 
     // ===== Password reset token expiry validation =====
@@ -367,11 +386,27 @@ class AuthServiceTest {
         when(userRepository.existsByEmail("new@test.com")).thenReturn(false);
         when(passwordEncoder.encode("StrongPass12")).thenReturn("encoded");
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        // Bootstrap: novi Client + default RSD CHECKING/PERSONAL racun.
+        when(clientRepository.findByEmail("new@test.com")).thenReturn(Optional.empty());
+        when(clientRepository.save(any(Client.class))).thenAnswer(inv -> {
+            Client c = inv.getArgument(0);
+            c.setId(101L);
+            return c;
+        });
+        when(accountRepository.findByClientId(101L)).thenReturn(List.of());
+        Currency rsd = new Currency();
+        rsd.setCode("RSD");
+        when(currencyRepository.findByCode("RSD")).thenReturn(Optional.of(rsd));
+        when(employeeRepository.findAll()).thenReturn(List.of(employee));
+        when(accountRepository.existsByAccountNumber(any(String.class))).thenReturn(false);
+        when(accountRepository.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
 
         String result = authService.register(request);
 
         assertThat(result).isEqualTo("User registered successfully");
         verify(userRepository).save(any(User.class));
+        verify(clientRepository).save(any(Client.class));
+        verify(accountRepository).save(any(Account.class));
     }
 
     // ===== Refresh token rotation (new access from refresh) =====
@@ -471,6 +506,6 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login(new LoginRequestDto("null-active@test.com", "pass")))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Employee account is not active");
+                .hasMessageContaining("Nalog je deaktiviran");
     }
 }

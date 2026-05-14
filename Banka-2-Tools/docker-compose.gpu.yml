@@ -48,7 +48,7 @@
 #   ollama pull gemma4:e4b
 # pa override-uju:
 #   assistant.base-url=http://host.docker.internal:11434/v1
-# i izostave `ollama` + `ollama-pull` servise iz Tools compose-a.
+# i izostave `ollama` servis iz Tools compose-a.
 #
 # ============================================================================
 # OCEKIVANO UBRZANJE (RTX 4070, Q4_K_M kvant Gemma 4 E4B):

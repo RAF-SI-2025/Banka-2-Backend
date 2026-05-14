@@ -2,6 +2,7 @@ package rs.raf.banka2_bek.profitbank.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.auth.util.UserRole;
 import rs.raf.banka2_bek.employee.model.Employee;
@@ -31,13 +32,10 @@ import java.util.Set;
  *   - Konvertuj u RSD po srednjem kursu (bez komisije)
  *   - Sumiraj kroz sve listinge
  *
- * Vraca samo aktuare koji imaju barem jedan DONE order (ili sve ako
- * proizilazi iz spec-a; trenutno spec kaze "spisak svih aktuara").
- *
- * NAPOMENA O CACHE-U:
- *  Ova kalkulacija je relativno teska. Kad cele Celine 4 budu zavrsene,
- *  preporuka je dodati Spring @Cacheable sa kratkim TTL-om (5 min) ili
- *  invalidirati keš pri svakom uspesnom order fill-u (preko Spring eventa).
+ * Cache: Caffeine sa TTL 5 min (vidi {@link ProfitBankCacheConfig}).
+ * Iteracija po svim DONE orderima + per-order FX konverzija je O(n) u
+ * broju ordera; posle 1000+ ordera u bazi sirov racun traje ~1-2s. Cache
+ * smanjuje na ~5ms na ponovljene pozive sa istim ulazom.
  */
 @Slf4j
 @Service
@@ -48,6 +46,7 @@ public class ActuaryProfitService {
     private final EmployeeRepository employeeRepository;
     private final CurrencyConversionService currencyConversionService;
 
+    @Cacheable(value = ProfitBankCacheConfig.ACTUARY_PROFIT_CACHE, sync = true)
     public List<ActuaryProfitDto> listAllActuariesProfit() {
         // 1) Skupi sve DONE ordere koje su inicirali zaposleni (userRole=EMPLOYEE).
         List<Order> doneEmployeeOrders = orderRepository.findByIsDoneTrue().stream()

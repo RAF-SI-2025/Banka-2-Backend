@@ -1,4 +1,4 @@
-package rs.raf.banka2_bek.investmentFund.service;
+package rs.raf.banka2_bek.investmentfund.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -106,10 +106,16 @@ class InvestmentFundServicePositionsTest {
                 .containsOnly(5L);
         assertThat(result).extracting(ClientFundPositionDto::getUserRole)
                 .containsOnly("CLIENT");
-        // Izvedena polja su jos uvek null (FundValueCalculator nije gotov u T12).
-        assertThat(result).allMatch(d -> d.getCurrentValue() == null
-                && d.getPercentOfFund() == null
-                && d.getProfit() == null);
+        // Izvedena polja su BigDecimal (ne null). U ovom testu fundValueCalculator
+        // nije @Mock-ovan, pa safeCompute lovi NPE i vraca 0. clientFundPositionRepository.findByFundId
+        // takodje nije stub-ovan, pa Mockito vraca prazan list i sumInvested = 0.
+        // Posledica: currentValue = 0, percentOfFund = 0, profit = 0 - totalInvested.
+        assertThat(result).allMatch(d -> d.getCurrentValue() != null
+                && d.getCurrentValue().signum() == 0
+                && d.getPercentOfFund() != null
+                && d.getPercentOfFund().signum() == 0
+                && d.getProfit() != null
+                && d.getProfit().signum() < 0);
     }
 
     @Test

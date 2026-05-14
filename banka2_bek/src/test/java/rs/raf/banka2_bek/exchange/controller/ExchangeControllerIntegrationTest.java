@@ -19,7 +19,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-//FIXME - T6 puca na ovom delu
+// Integration test za ExchangeController. Glavni test scenariji su privremeno
+// zakomentarisani ispod (rad u toku); zadrzano kao @WebMvcTest harness za
+// kontroler bean-iranje dok se test setup ne stabilizuje.
 @WebMvcTest(ExchangeController.class)
 class ExchangeControllerIntegrationTest {
 

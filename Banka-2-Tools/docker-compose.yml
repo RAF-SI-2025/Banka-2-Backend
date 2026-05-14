@@ -19,14 +19,26 @@
 # Mac Apple Silicon: pokreni Ollama van Docker-a, samo wikipedia + rag su u stack-u.
 
 services:
-  # Ollama LLM (Gemma 4 E4B) — auto-pull pri prvom startu, kesirano u volume
+  # Ollama LLM sa Gemma 4 E2B model-om PRE-BAKED u image layer-u.
+  # Idiot-proof: `docker compose pull && up -d` daje odmah upotrebljiv LLM,
+  # bez 5-15min cekanja na model pull. Image se gradi u `backend-cd.yml`
+  # (ollama job) na svaki push na main, push-ovan u GHCR sa SHA + latest tag.
+  #
+  # Lokalni build (kad GHCR nije dostupan ili u offline rezimu):
+  #   `docker compose up -d --build` — Dockerfile u ./ollama/ pull-uje model
+  #   tokom build-a (~10-15min), commit-uje u image layer.
   ollama:
-    image: ollama/ollama:latest
+    build: ./ollama
+    image: ghcr.io/raf-si-2025/banka2-ollama:latest
     container_name: banka2_ollama
     ports:
       - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
+    # NEMA `volumes: ollama_models:/root/.ollama` mount-a — Docker named
+    # volume bi overlay-ovao image-ov /root/.ollama direktorijum, sto bi
+    # SAKRILO pre-bake-ovane modele (idiot-proof anti-pattern). Ako neko
+    # zeli persistent custom modele, neka koristi `docker exec banka2_ollama
+    # ollama pull <model>` pa `docker commit` — ali za default sve sto treba
+    # je vec u image-u.
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       OLLAMA_KEEP_ALIVE: 24h
@@ -73,63 +85,15 @@ services:
       start_period: 600s
     restart: unless-stopped
 
-  # Pomocni one-shot kontejner — pull-uje model pri prvom startu pa zavrsava.
-  # Default je `gemma4:e2b` (7.2GB) jer staje cela u 8GB VRAM (RTX 4070 Laptop).
-  # Veci `gemma4:e4b` (9.6GB) trazi 12GB+ VRAM-a inace ide split CPU/GPU.
-  # Override-uj preko env var-a:
-  #   OLLAMA_PULL_MODEL=gemma3:4b docker compose up -d   (3.3GB, najbrzi)
-  #   OLLAMA_PULL_MODEL=gemma4:e4b docker compose up -d  (9.6GB, najmocniji)
-  ollama-pull:
-    image: ollama/ollama:latest
-    container_name: banka2_ollama_pull
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      OLLAMA_HOST: ollama:11434
-      OLLAMA_PULL_MODEL: ${OLLAMA_PULL_MODEL:-gemma4:e2b}
-    entrypoint:
-      - sh
-      - -c
-      - |
-        echo "Cekam Ollama API..."
-        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-          ollama list >/dev/null 2>&1 && break
-          echo "  pokusaj $$i — Ollama jos nije spremna, cekam 5s..."
-          sleep 5
-        done
-        if ollama list 2>/dev/null | grep -q "$$OLLAMA_PULL_MODEL"; then
-          echo "Model $$OLLAMA_PULL_MODEL vec pull-ovan, preskacem."
-        else
-          echo "Pull-ujem $$OLLAMA_PULL_MODEL — prvi put traje 5-15min..."
-          ollama pull "$$OLLAMA_PULL_MODEL"
-          echo "$$OLLAMA_PULL_MODEL uspesno pull-ovan."
-        fi
-        # ===== FORCE 100% GPU OFFLOAD =====
-        # Ollama 0.5+ je uklonio OLLAMA_NUM_GPU kao server env var, sad
-        # mora ici kroz Modelfile PARAMETER ili request options.num_gpu.
-        # Kreiramo derived model "gemma4:e2b-gpu" sa num_gpu=999 koji
-        # forsira svih 36 layer-a u VRAM. Bez ovoga, Ollama auto-split-uje
-        # zavisno od free VRAM-a u tom trenutku (3GB umesto 8GB).
-        DERIVED_MODEL="$${OLLAMA_PULL_MODEL%%:*}:$${OLLAMA_PULL_MODEL##*:}-gpu"
-        if ollama list 2>/dev/null | grep -q "$$DERIVED_MODEL"; then
-          echo "Derived model $$DERIVED_MODEL vec postoji."
-        else
-          echo "Kreiram $$DERIVED_MODEL sa PARAMETER num_gpu 999 (full VRAM offload)..."
-          cat > /tmp/Modelfile.gpu << EOF
-        FROM $$OLLAMA_PULL_MODEL
-        PARAMETER num_gpu 999
-        PARAMETER num_ctx 4096
-        EOF
-          ollama create "$$DERIVED_MODEL" -f /tmp/Modelfile.gpu
-          echo "$$DERIVED_MODEL kreiran — svi layeri ce ici na GPU."
-        fi
-    depends_on:
-      - ollama
-    restart: "no"
+  # NAPOMENA: stari `ollama-pull` one-shot kontejner je uklonjen — vise nije
+  # potreban jer su `gemma4:e2b` + `gemma4:e2b-gpu` (sa num_gpu=999) vec
+  # pre-bake-ovani u banka2-ollama image-u tokom GHA build-a (vidi
+  # ./ollama/Dockerfile). Korisnik ne mora da ceka pull-ovanje modela.
 
   # Wikipedia sidecar (FastAPI + wikipedia 1.4 + cachetools TTL 1h)
   wikipedia-tool:
     build: ./wikipedia-service
+    image: ghcr.io/raf-si-2025/banka2-wikipedia-tool:latest
     container_name: banka2_wikipedia_tool
     ports:
       - "8090:8090"
@@ -140,6 +104,7 @@ services:
   # relativno ka Banka-2-Tools (../.. = projekat root, pa "Info o predmetu").
   rag-tool:
     build: ./rag-service
+    image: ghcr.io/raf-si-2025/banka2-rag-tool:latest
     container_name: banka2_rag_tool
     ports:
       - "8091:8091"
@@ -166,6 +131,7 @@ services:
   # Phonemizer dep: espeak-ng instaliran u Dockerfile-u kao fallback.
   kokoro-tts:
     build: ./kokoro-tts
+    image: ghcr.io/raf-si-2025/banka2-kokoro-tts:latest
     container_name: banka2_kokoro_tts
     ports:
       - "8092:8092"
@@ -176,6 +142,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  ollama_models:
+  # NAPOMENA: `ollama_models` volume je uklonjen — modeli su sada PRE-BAKED
+  # u banka2-ollama image-u (vidi ./ollama/Dockerfile). Korisnik dobija
+  # gotov LLM bez 5-15min cekanja.
   chroma_persist:
   kokoro_cache:

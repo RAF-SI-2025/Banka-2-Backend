@@ -21,87 +21,6 @@ import rs.raf.banka2_bek.interbank.protocol.UserInformation;
 
 import java.util.List;
 
-/*
-================================================================================
- TODO — HTTP KLIJENT ZA SLANJE PORUKA PARTNERSKIM BANKAMA (PROTOKOL §2.9-2.11)
- Zaduzen: BE tim
- Spec ref: protokol §2.9 Message exchange, §2.10 Authentication,
-           §2.11 Sending messages
---------------------------------------------------------------------------------
- SVRHA:
- Apstrakcija preko HTTP poziva ka drugim bankama. Svaki servis koji salje
- (TransactionExecutorService, OtcNegotiationService, InterbankRetryScheduler)
- poziva samo ovde metod `sendMessage(...)` — klijent resolvuje URL iz
- routingNumber-a, dodaje X-Api-Key header, timeout, serializuje u JSON,
- upise u InterbankMessage audit log i vrati odgovor.
-
- ENDPOINT (po protokolu §2.11):
-   POST {partner.baseUrl}/interbank
-   Content-Type: application/json
-   X-Api-Key: {partner.outboundToken}
-
-   Body: Message<Type> (vidi interbank.protocol.Message)
-
-   Odgovor:
-     202 Accepted     — primljeno ali nije zavrseno; pošiljač retry-uje kasnije
-     200 OK           — primljeno + zavrseno; body = response (npr. TransactionVote
-                        za NEW_TX, ili prazno za COMMIT_TX/ROLLBACK_TX)
-     204 No Content   — primljeno + zavrseno bez tela
-     ostalo / network — neuspeh; retry
-
- OBAVEZNE METODE:
-
-   <Req, Resp> Resp sendMessage(int targetRoutingNumber,
-                                 MessageType type,
-                                 Message<Req> envelope,
-                                 Class<Resp> responseType);
-     Generic send. responseType je TransactionVote.class za NEW_TX, Void.class
-     za COMMIT_TX/ROLLBACK_TX. Vraca Resp ili baca InterbankCommunicationException
-     na 4xx/5xx/timeout (NE na 202 — to je legitimno "later").
-
-   List<PublicStock> fetchPublicStocks(int routingNumber);
-     GET {baseUrl}/public-stock — vidi §3.1.
-
-   ForeignBankId postNegotiation(int routingNumber, OtcOffer offer);
-     POST {baseUrl}/negotiations — vidi §3.2.
-
-   void putCounterOffer(ForeignBankId negotiationId, OtcOffer offer);
-     PUT {baseUrl}/negotiations/{rn}/{id} — vidi §3.3.
-
-   OtcNegotiation getNegotiation(ForeignBankId negotiationId);
-     GET {baseUrl}/negotiations/{rn}/{id} — vidi §3.4.
-
-   void deleteNegotiation(ForeignBankId negotiationId);
-     DELETE {baseUrl}/negotiations/{rn}/{id} — vidi §3.5.
-
-   void acceptNegotiation(ForeignBankId negotiationId);
-     GET {baseUrl}/negotiations/{rn}/{id}/accept — vidi §3.6.
-     SINHRONO: vraca tek kad je transakcija COMMITTED.
-
-   UserInformation getUserInfo(ForeignBankId userId);
-     GET {baseUrl}/user/{rn}/{id} — vidi §3.7.
-
- PREPORUKA IMPLEMENTACIJE:
-  - Koristi Spring RestClient (sinhroni) ili WebClient (async).
-  - Jedan @Bean sa connection pool-om; per-partner URL i token resolvuju
-    se pri svakom pozivu kroz BankRoutingService.resolvePartnerByRouting.
-  - Timeout: 10s default, konfigurabilan u application.properties.
-  - **NE radi retry na ovom nivou** — retry radi InterbankRetryScheduler
-    citajuci message log (§2.9 reliability).
-  - 202 nije error — zabelezi i vrati neki "PENDING" sentinel, scheduler
-    cita iz log-a i retry-uje.
-
- IDEMPOTENCY:
-  - InterbankMessageService.recordOutbound(idempotenceKey, body) PRE poziva.
-  - Ako request fail-uje sa mreznom greskom, idempotenceKey ostaje isti
-    pri retry-u (§2.9 at-most-once preko ponavljanja kljuca).
-
- GRESKE:
-  - InterbankCommunicationException (RuntimeException) za 4xx/5xx/timeout.
-  - 401 (autenticija) -> InterbankAuthException — partner ne prihvata nas
-    token; trazi rotaciju.
-================================================================================
-*/
 @Service
 @RequiredArgsConstructor
 public class InterbankClient {
@@ -110,9 +29,6 @@ public class InterbankClient {
     private final BankRoutingService bankRoutingService;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
-
-    // TODO: injectovati: ObjectMapper, InterbankMessageService (audit log),
-    //   RestClient (configured sa timeout-om), MeterRegistry (metrics)
 
     public <Req, Resp> Resp sendMessage(int targetRoutingNumber,
                                          MessageType type,
@@ -361,10 +277,16 @@ public class InterbankClient {
      */
     public UserInformation getUserInfo(ForeignBankId userId) {
         InterbankProperties.PartnerBank partnerBank = resolvePartner(userId.routingNumber());
+        // §3.7 path je per-partner konfigurabilan: spec default je "/user/{rn}/{id}",
+        // ali Tim 1 ima override "/interbank/user/{rn}/{id}" (path collision sa FE rutom).
+        String pathTemplate = partnerBank.getUserInfoPath();
+        if (pathTemplate == null || pathTemplate.isBlank()) {
+            pathTemplate = "/user/{rn}/{id}";
+        }
         try {
             return restClient
                     .get()
-                    .uri(partnerBank.getBaseUrl() + "/user/{rn}/{id}",
+                    .uri(partnerBank.getBaseUrl() + pathTemplate,
                             userId.routingNumber(), userId.id())
                     .header("X-Api-Key", partnerBank.getOutboundToken())
                     .retrieve()
@@ -373,6 +295,11 @@ public class InterbankClient {
                                 if (res.getStatusCode().value() == 401)
                                     throw new InterbankExceptions.InterbankAuthException(
                                             "Invalid API key for routing " + userId.routingNumber() + ".");
+                                // §3.7 — 404 nije fatalno, samo nedostatak imena. Bacamo poseban tip
+                                // da caller moze graceful fallback (prikazi opaque id u UI-u).
+                                if (res.getStatusCode().value() == 404)
+                                    throw new InterbankExceptions.InterbankUserNotFoundException(
+                                            "User " + userId + " not found at partner bank");
                                 throw new InterbankExceptions.InterbankCommunicationException(
                                         "HTTP " + res.getStatusCode().value()
                                                 + " from user " + userId + " on GET");

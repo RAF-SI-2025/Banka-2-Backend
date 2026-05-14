@@ -23,6 +23,7 @@ import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.tax.dto.TaxRecordDto;
 import rs.raf.banka2_bek.tax.model.TaxRecord;
+import rs.raf.banka2_bek.tax.repository.TaxRecordBreakdownRepository;
 import rs.raf.banka2_bek.tax.repository.TaxRecordRepository;
 
 import java.math.BigDecimal;
@@ -47,6 +48,7 @@ import static org.mockito.Mockito.*;
 class TaxServiceTest {
 
     @Mock private TaxRecordRepository taxRecordRepository;
+    @Mock private TaxRecordBreakdownRepository taxRecordBreakdownRepository;
     @Mock private OrderRepository orderRepository;
     @Mock private UserRepository userRepository;
     @Mock private EmployeeRepository employeeRepository;

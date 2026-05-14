@@ -165,6 +165,8 @@ public class PaymentServiceImpl implements PaymentService {
 
         // ===== 5. CROSS-CURRENCY KONVERZIJA =====
         BigDecimal creditedAmount = amount; // koliko primalac dobija
+        Account bankFromAccountRef = null;
+        Account bankToAccountRef = null;
         if (isCrossCurrency) {
             String fromCurr = fromAccount.getCurrency().getCode();
             String toCurr = toAccount.getCurrency().getCode();
@@ -182,14 +184,14 @@ public class PaymentServiceImpl implements PaymentService {
             // Banka placa target valutu primaocu
             bankToAccount.setBalance(bankToAccount.getBalance().subtract(creditedAmount));
             bankToAccount.setAvailableBalance(bankToAccount.getAvailableBalance().subtract(creditedAmount));
-            accountRepository.save(bankToAccount);
+            bankToAccountRef = accountRepository.save(bankToAccount);
 
             // Banka prima source valutu (amount + provizija) od klijenta
             Account bankFromAccount = accountRepository.findBankAccountForUpdateByCurrency(bankRegistrationNumber, fromCurr)
                     .orElseThrow(() -> new RuntimeException("Banka nema racun za " + fromCurr));
             bankFromAccount.setBalance(bankFromAccount.getBalance().add(totalFromClient));
             bankFromAccount.setAvailableBalance(bankFromAccount.getAvailableBalance().add(totalFromClient));
-            accountRepository.save(bankFromAccount);
+            bankFromAccountRef = accountRepository.save(bankFromAccount);
         }
 
         // ===== 6. SKINI OD KLIJENTA (amount + fee, JEDNOM) =====
@@ -236,7 +238,15 @@ public class PaymentServiceImpl implements PaymentService {
             throw new IllegalStateException("Generisanje broja placanja nije uspelo.");
 
         // ===== 9. TRANSAKCIJE + EMAIL =====
-        transactionService.recordPaymentSettlement(savedPayment, toAccount, client, creditedAmount);
+        // T2-013: za cross-currency, persistiraj 3-fazni lanac (6 transaction redova)
+        // za audit trail (spec C2 §255-258). Za same-currency, 2 reda (debit + credit).
+        if (isCrossCurrency && bankFromAccountRef != null && bankToAccountRef != null) {
+            transactionService.recordCrossCurrencyPaymentSettlement(
+                    savedPayment, toAccount, bankFromAccountRef, bankToAccountRef,
+                    client, totalFromClient, creditedAmount);
+        } else {
+            transactionService.recordPaymentSettlement(savedPayment, toAccount, client, creditedAmount);
+        }
 
         try {
             mailNotificationService.sendPaymentConfirmationMail(
@@ -348,6 +358,65 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public void validatePayment(CreatePaymentRequestDto request) {
+        // T2-009 fix: preflight pre OTP-a. Read-only, bez side effects, bez OPTIMISTIC LOCK.
+        if (request == null) {
+            throw new IllegalArgumentException("Podaci o placanju nedostaju.");
+        }
+        if (request.getFromAccount() == null || request.getFromAccount().isBlank()) {
+            throw new IllegalArgumentException("Racun posiljaoca nedostaje.");
+        }
+        if (request.getToAccount() == null || request.getToAccount().isBlank()) {
+            throw new IllegalArgumentException("Racun primaoca nedostaje.");
+        }
+        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Iznos mora biti veci od 0.");
+        }
+
+        Account fromAccount = accountRepository.findByAccountNumber(request.getFromAccount())
+                .orElseThrow(() -> new IllegalArgumentException("Racun posiljaoca ne postoji."));
+        Account toAccount = accountRepository.findByAccountNumber(request.getToAccount())
+                .orElseThrow(() -> new IllegalArgumentException("Racun primaoca ne postoji."));
+
+        if (fromAccount.getStatus() != AccountStatus.ACTIVE) {
+            throw new IllegalArgumentException("Racun posiljaoca nije aktivan.");
+        }
+        if (toAccount.getStatus() != AccountStatus.ACTIVE) {
+            throw new IllegalArgumentException("Racun primaoca nije aktivan.");
+        }
+        if (fromAccount.getId().equals(toAccount.getId())) {
+            throw new IllegalArgumentException("Racuni moraju biti razliciti.");
+        }
+
+        Client client = getAuthenticatedClient();
+        if (fromAccount.getClient() == null || !fromAccount.getClient().getId().equals(client.getId())) {
+            throw new IllegalArgumentException("Racun ne pripada klijentu.");
+        }
+
+        BigDecimal amount = request.getAmount();
+        boolean isCrossCurrency = !fromAccount.getCurrency().getId().equals(toAccount.getCurrency().getId());
+        BigDecimal fee = isCrossCurrency
+                ? amount.multiply(COMMISSION_RATE).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        BigDecimal totalFromClient = amount.add(fee);
+
+        if (fromAccount.getAvailableBalance().compareTo(totalFromClient) < 0) {
+            throw new IllegalArgumentException(
+                    "Nedovoljno sredstava na racunu. Potrebno: " + totalFromClient
+                            + " " + fromAccount.getCurrency().getCode());
+        }
+        if (fromAccount.getDailyLimit() != null && fromAccount.getDailyLimit().compareTo(BigDecimal.ZERO) > 0
+                && fromAccount.getDailySpending().add(amount).compareTo(fromAccount.getDailyLimit()) > 0) {
+            throw new IllegalArgumentException("Prekoracen dnevni limit.");
+        }
+        if (fromAccount.getMonthlyLimit() != null && fromAccount.getMonthlyLimit().compareTo(BigDecimal.ZERO) > 0
+                && fromAccount.getMonthlySpending().add(amount).compareTo(fromAccount.getMonthlyLimit()) > 0) {
+            throw new IllegalArgumentException("Prekoracen mesecni limit.");
+        }
+    }
+
+    @Override
     public Page<PaymentListItemDto> getPayments(Pageable pageable, LocalDateTime fromDate, LocalDateTime toDate,
             String accountNumber, BigDecimal minAmount, BigDecimal maxAmount, PaymentStatus status) {
         Client client = getOptionalClient();
@@ -444,5 +513,59 @@ public class PaymentServiceImpl implements PaymentService {
 
     private String generateOrderNumber() {
         return "PAY-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    }
+
+    /**
+     * T2-012 audit trail: persistira ABORTED red u `payments` da bi se
+     * sacuvao trag kada placanje propada zbog 3 neuspela OTP unosa ili
+     * isteka koda. Best-effort: ne baca exception ako fails — klijent
+     * vec dobija 403 status.
+     */
+    @Override
+    @Transactional
+    public Long recordAbortedPayment(CreatePaymentRequestDto request, String reason) {
+        if (request == null || request.getFromAccount() == null || request.getAmount() == null) {
+            return null;
+        }
+        try {
+            Account fromAccount = accountRepository.findByAccountNumber(request.getFromAccount()).orElse(null);
+            if (fromAccount == null) return null;
+
+            Client client = getOptionalClient();
+            if (client == null || fromAccount.getClient() == null
+                    || !fromAccount.getClient().getId().equals(client.getId())) {
+                return null;
+            }
+
+            String paymentCode = request.getPaymentCode() != null ? request.getPaymentCode().getCode() : null;
+            String purpose = reason != null && !reason.isBlank()
+                    ? reason
+                    : "OTP otkazano";
+            Payment payment = Payment.builder()
+                    .orderNumber(generateOrderNumber())
+                    .fromAccount(fromAccount)
+                    .toAccountNumber(request.getToAccount() != null ? request.getToAccount() : "N/A")
+                    .amount(request.getAmount())
+                    .fee(BigDecimal.ZERO)
+                    .currency(fromAccount.getCurrency())
+                    .recipientName(request.getRecipientName())
+                    .paymentCode(paymentCode)
+                    .referenceNumber(request.getReferenceNumber())
+                    .purpose(purpose)
+                    .status(PaymentStatus.ABORTED)
+                    .createdBy(client)
+                    .build();
+            for (int attempt = 1; attempt <= ORDER_NUMBER_MAX_RETRIES; attempt++) {
+                try {
+                    Payment saved = paymentRepository.saveAndFlush(payment);
+                    return saved.getId();
+                } catch (DataIntegrityViolationException ex) {
+                    payment.setOrderNumber(generateOrderNumber());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to record ABORTED payment audit trail: {}", e.getMessage());
+        }
+        return null;
     }
 }

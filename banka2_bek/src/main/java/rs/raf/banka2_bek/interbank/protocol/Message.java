@@ -10,8 +10,8 @@ package rs.raf.banka2_bek.interbank.protocol;
  *
  * Transport: POST /interbank, Content-Type application/json, X-Api-Key header.
  *
- * TODO: Jackson polimorfizam — registrovati de-serializer koji bira tip
- * `message` poljem na osnovu `messageType`. Vidi Asset.java za pattern.
+ * Polimorfizam: pri deserijalizaciji se konkretni tip {@code T} bira preko
+ * Jackson generic type-a u sendMessage poziva {@link rs.raf.banka2_bek.interbank.service.InterbankClient}.
  */
 public record Message<T>(
         IdempotenceKey idempotenceKey,

@@ -1,0 +1,111 @@
+# MLA stack: Prometheus + Grafana + AlertManager + Discord alert bridge.
+# Pokrece se zasebnim docker-compose-om koji se prikljucuje banka2 docker network-u.
+# Network alias `banka-2-backend_default` je definisan u glavnom backend stack-u
+# kao `external: true` referenca u monitoring-u.
+#
+# Pokretanje:
+#   docker compose up -d
+# (iz monitoring/ direktorijuma)
+#
+# Endpoint-i:
+#   Prometheus    http://localhost:9090
+#   Grafana       http://localhost:3001    (admin/admin, prvi login menja password)
+#   AlertManager  http://localhost:9093
+
+# Project name override: Docker compose default-uje na folder ime ("monitoring"),
+# ali eksplicitno postavljamo `banka-2-monitoring` da matchuje konvenciju
+# ostalih stack-ova (banka-2-backend, banka-2-frontend, banka-2-tools).
+name: banka-2-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: banka2_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - banka2_net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: banka2_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - banka2_net
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: banka2_alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      # Single-node mode — gasimo gossip mesh jer u Docker Desktop kontekstu
+      # AlertManager ne moze da deduce private IP (samo bridge mreza), pa
+      # bez ovog flag-a containerпуца u beskonacnoj restart petlji.
+      - '--cluster.listen-address='
+    ports:
+      - "9093:9093"
+    networks:
+      - banka2_net
+
+  # Bridge servis: AlertManager nema native Discord webhook receiver. Vec
+  # ima `webhook_configs` za generic JSON. Ovaj Python adapter prevodi
+  # AlertManager-ov payload u Discord embed format.
+  # Implementiran u Banka-2-Tools/alert-router-service/.
+  alert-router:
+    build: ../Banka-2-Tools/alert-router-service
+    image: ghcr.io/raf-si-2025/banka2-alert-router:latest
+    container_name: banka2_alert_router
+    restart: unless-stopped
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      LOG_LEVEL: INFO
+    ports:
+      - "8093:8093"
+    networks:
+      - banka2_net
+
+networks:
+  banka2_net:
+    external: true
+    name: banka-2-backend_default
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

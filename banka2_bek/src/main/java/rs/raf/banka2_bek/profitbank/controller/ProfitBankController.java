@@ -37,21 +37,13 @@ public class ProfitBankController {
     @GetMapping("/fund-positions")
     public ResponseEntity<List<ClientFundPositionDto>> fundPositions() {
         // Banka kao klijent fonda (P9): ClientFundPosition gde je userId = ownerClientId
-        // banke i userRole = "CLIENT". Implementacija u InvestmentFundService.listBankPositions
-        // (jos u TODO-u — vraca prazan list dok fund flow nije dovrsen).
-        try {
-            return ResponseEntity.ok(investmentFundService.listBankPositions());
-        } catch (UnsupportedOperationException e) {
-            // InvestmentFundService.listBankPositions je jos TODO — vrati prazan list
-            // umesto 500 kako FE moze da renderuje "Banka nema pozicije" placeholder.
-            return ResponseEntity.ok(List.of());
-        }
+        // banke i userRole = "CLIENT" (vidi InvestmentFundService.listBankPositions).
+        return ResponseEntity.ok(investmentFundService.listBankPositions());
     }
 
-    // TODO (opciono Celina 4 (Nova) §4585-4628):
+    // Buduci optional endpoint-i (Celina 4 (Nova) §4585-4628):
     //   POST /profit-bank/fund-positions/{fundId}/invest  — supervizor uplata u ime banke
     //   POST /profit-bank/fund-positions/{fundId}/withdraw — supervizor povlacenje u ime banke
-    //   InvestmentFundService.invest/withdraw sa userRole=CLIENT i userId=ownerClientId banke
-    //   pokriva ovaj scenario; dodati nove endpointe samo ako spec eksplicitno
-    //   trazi UI dugmad bez FX komisije (vec implementirano u P7).
+    // InvestmentFundService.invest/withdraw vec pokriva ovaj scenario sa userRole=CLIENT i
+    // userId=ownerClientId banke; dodatni endpointi su redundantni za trenutni demo flow.
 }

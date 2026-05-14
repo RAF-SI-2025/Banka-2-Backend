@@ -6,8 +6,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.interbank.config.InterbankProperties;
 import rs.raf.banka2_bek.interbank.protocol.CurrencyCode;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcContractRepository;
+import rs.raf.banka2_bek.interbank.repository.InterbankOtcNegotiationRepository;
+import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.interbank.protocol.ForeignBankId;
 import rs.raf.banka2_bek.interbank.protocol.MonetaryValue;
 import rs.raf.banka2_bek.interbank.protocol.OtcNegotiation;
@@ -39,6 +44,18 @@ class OtcNegotiationServiceTest {
 
     @Mock
     private InterbankClient client;
+    @Mock
+    private InterbankOtcNegotiationRepository negotiationRepository;
+    @Mock
+    private InterbankOtcContractRepository contractRepository;
+    @Mock
+    private PortfolioRepository portfolioRepository;
+    @Mock
+    private ClientRepository clientRepository;
+    @Mock
+    private EmployeeRepository employeeRepository;
+    @Mock
+    private TransactionExecutorService transactionExecutor;
 
     private InterbankProperties properties;
     private OtcNegotiationService service;
@@ -48,7 +65,10 @@ class OtcNegotiationServiceTest {
         properties = new InterbankProperties();
         properties.setMyRoutingNumber(OUR_RN);
         properties.setMyBankDisplayName("Banka 2");
-        service = new OtcNegotiationService(client, properties);
+        service = new OtcNegotiationService(client, properties,
+                negotiationRepository, contractRepository,
+                portfolioRepository, clientRepository, employeeRepository,
+                transactionExecutor);
     }
 
     // ───────────────────── §3.1 fetchRemotePublicStocks ─────────────────────

@@ -9,47 +9,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
-/*
-================================================================================
- TODO — INVESTICIONI FOND ENTITET
- Zaduzen: BE tim
- Spec referenca: Celina 4, linije 160-219 (Logika + Entitet fond)
---------------------------------------------------------------------------------
- SVRHA:
- Fond ima 1 RSD racun u banci (kreira se automatski pri kreiranju fonda),
- menadzera (supervizor), listu hartija (prati se kroz postojeci Portfolio sa
- userRole=FUND, userId=fund.id), i listu pozicija klijenata koji su ulozili
- u fond.
-
- POLJA:
-  - id                 PK
-  - name               Jedinstveno ime (dodaj unique constraint)
-  - description        Kratak opis strategije
-  - minimumContribution Minimalni ulog u RSD (BigDecimal)
-  - managerEmployeeId  Id supervizora koji upravlja (FK na Employee)
-  - accountId          Id bankinog RSD racuna koji fond koristi (FK na Account)
-  - createdAt          Datum osnivanja
-
- IZVEDENA POLJA (ne cuvaju se, racunaju se):
-  - fundValue = account.balance + sum(portfolio.quantity * listing.price) konvertovano u RSD
-  - profit = fundValue - sum(ClientFundPosition.totalInvested)
-
- VEZE:
-  - Employee (manager) — nema direktno @ManyToOne, samo cuvaj managerEmployeeId
-  - Account (fund's RSD) — slicno, samo accountId
-  - Portfolio — NE kroz relaciju, koristi postojeci Portfolio entitet sa
-    userRole="FUND" (ili "INVESTMENT_FUND") i userId=fund.id
-
- PROMENA VLASNISTVA:
-  Ako admin ukloni isSupervisor permisiju, svi fondovi ciji je managerEmployeeId
-  taj zaposleni automatski prebace na managerEmployeeId=admina koji je uklonio.
-  Ovo radi ActuaryServiceImpl.removePermission() kroz InvestmentFundService.
-  (Celina 4 linija 326)
-
- TABELA:
-  investment_funds
-================================================================================
-*/
 @Entity
 @Table(name = "investment_funds", uniqueConstraints = {
         @UniqueConstraint(name = "uk_fund_name", columnNames = "name")
@@ -85,8 +44,7 @@ public class InvestmentFund {
     @org.hibernate.annotations.ColumnDefault("1")
     private boolean active = true;
 
-    // TODO: razmotri da li treba `inception_date` (LocalDate) razlicito od createdAt-a
-    //   — spec primer prikazuje samo "Datum kreiranja". Nije obavezno.
+    /** Datum osnivanja fonda (po spec-u "Datum kreiranja"). */
     @Column(name = "inception_date")
     private LocalDate inceptionDate;
 
@@ -99,10 +57,9 @@ public class InvestmentFund {
      * sto je vlasnik banke uveden u seed. InvestmentFundService.listBankPositions
      * filtrira pozicije po (userRole='CLIENT', userId=ownerClientId).
      *
-     * TODO (BE tim): u seed.sql dodati klijenta "Banka 2 d.o.o." (ili sl.) i
-     * setovati ovo polje pri kreiranju fonda na njegov client_id. Alternativa
-     * je centralni `bank.owner-client-id` u application.properties + lookup
-     * pri svakom listBankPositions pozivu.
+     * Seed.sql sadrzi klijenta sa email='banka2.doo@banka.rs'; centralni
+     * `bank.owner-client-email` u application.properties resolvuje ID pri
+     * svakom listBankPositions pozivu.
      */
     @Column(name = "owner_client_id")
     private Long ownerClientId;

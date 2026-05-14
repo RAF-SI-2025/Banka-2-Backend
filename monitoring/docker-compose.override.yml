@@ -1,0 +1,6 @@
+# Port override jer Tim 1 drzi :9090 za svoj Prometheus.
+# `!override` flag govori docker compose-u da zameni port listu iz base yaml-a.
+services:
+  prometheus:
+    ports: !override
+      - "9099:9090"

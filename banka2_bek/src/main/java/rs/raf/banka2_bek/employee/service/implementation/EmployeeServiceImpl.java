@@ -103,6 +103,7 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .map(this::toResponse);
     }
 
+    @Transactional
     public EmployeeResponseDto updateEmployee(Long id, UpdateEmployeeRequestDto request) {
         Employee employee = employeeRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Employee with ID " + id + " not found."));
@@ -111,11 +112,18 @@ public class EmployeeServiceImpl implements EmployeeService {
             throw new IllegalStateException("Admin employees cannot be edited.");
         }
 
-        if (request.getEmail() != null) {
-            if (employeeRepository.existsByEmailAndIdNot(request.getEmail(), id)) {
-                throw new IllegalArgumentException("An employee with this email already exists.");
-            }
-            employee.setEmail(request.getEmail());
+        // Spec §30 dozvoljava izmenu "svih informacija osim ID-a i passworda",
+        // ALI email je identitet (login key, references u tokenima, audit log
+        // co-Author trail) — Plan_Manuelnog_Testiranja.pdf i T1-009/T1-010
+        // bug izvestaj traze read-only ponasanje. Defense-in-depth: kad neko
+        // posalje PUT sa drugacijim email-om (npr. zaobilazi disabled FE polje
+        // ili udje direktno na API), tihi no-op — ne ruzimo idempotent request
+        // sa istim email-om ali odbijamo promenu. Razlog za 400 umesto tihog
+        // ignore-a: FE mora videti da je akcija neuspela inace bi user mislio
+        // da je promenio email pa ne moze posle da se uloguje sa starim.
+        if (request.getEmail() != null && !request.getEmail().equals(employee.getEmail())) {
+            throw new IllegalArgumentException(
+                    "Email zaposlenog se ne moze menjati. Email je identifikator naloga.");
         }
 
         if (request.getFirstName() != null) employee.setFirstName(request.getFirstName());
@@ -186,6 +194,7 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .orElse(fallbackId);
     }
 
+    @Transactional
     public void deactivateEmployee(Long id) {
         Employee employee = employeeRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Employee with ID " + id + " not found."));

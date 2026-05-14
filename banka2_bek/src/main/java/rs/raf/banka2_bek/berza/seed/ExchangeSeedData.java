@@ -56,7 +56,8 @@ public class ExchangeSeedData implements ApplicationRunner {
                         .name("London Stock Exchange").acronym("LSE").micCode("XLON")
                         .country("GB").currency("GBP").timeZone("Europe/London")
                         .openTime(LocalTime.of(8, 0)).closeTime(LocalTime.of(16, 30))
-                        .postMarketCloseTime(LocalTime.of(20, 0))
+                        // Opciono.3 — close+4h = 20:30, spec Celina 3 §404
+                        .postMarketCloseTime(LocalTime.of(20, 30))
                         .testMode(true)
                         .build(),
                 Exchange.builder()

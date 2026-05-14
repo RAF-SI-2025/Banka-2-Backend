@@ -40,16 +40,36 @@ public class CardServiceImpl implements CardService {
     @Override
     @Transactional
     public CardResponseDto createCard(CreateCardRequestDto request) {
-        Client client = getAuthenticatedClient();
-        Account account = accountRepository.findById(request.getAccountId())
-                .orElseThrow(() -> new RuntimeException("Racun nije pronadjen"));
-
-        if (account.getClient() == null || !account.getClient().getId().equals(client.getId())) {
-            throw new RuntimeException("Nemate pristup ovom racunu");
+        // SC28/T2-007 fix (14.05.2026): kad zaposleni pravi karticu u ime klijenta,
+        // JWT principal je email zaposlenog (NIJE klijent), pa getAuthenticatedClient()
+        // ne nadje klijenta i puca "Klijent nije pronadjen". Resenje: za EMPLOYEE/ADMIN
+        // role resolve klijenta preko account.getClient(); za CLIENT zadrzi ownership check.
+        boolean callerIsEmployee = isCallerEmployeeOrAdmin();
+        Client client;
+        if (callerIsEmployee) {
+            // Auth check (employee mora biti autentifikovan da bismo dosli ovde).
+            requireAuthenticated();
+        } else {
+            client = getAuthenticatedClient();
+            Account account = accountRepository.findById(request.getAccountId())
+                    .orElseThrow(() -> new RuntimeException("Racun nije pronadjen"));
+            if (account.getClient() == null || !account.getClient().getId().equals(client.getId())) {
+                throw new RuntimeException("Nemate pristup ovom racunu");
+            }
+            checkCardLimit(account, client);
+            BigDecimal limit = request.getCardLimit() != null ? request.getCardLimit() : BigDecimal.valueOf(100000);
+            CardType cardType = request.getCardType() != null ? request.getCardType() : CardType.VISA;
+            return toResponse(createAndSaveCard(account, client, limit, cardType));
         }
 
+        // Employee/Admin path: lookup account, resolve client from account
+        Account account = accountRepository.findById(request.getAccountId())
+                .orElseThrow(() -> new RuntimeException("Racun nije pronadjen"));
+        client = account.getClient();
+        if (client == null) {
+            throw new RuntimeException("Racun nema vlasnika (klijenta)");
+        }
         checkCardLimit(account, client);
-
         BigDecimal limit = request.getCardLimit() != null ? request.getCardLimit() : BigDecimal.valueOf(100000);
         CardType cardType = request.getCardType() != null ? request.getCardType() : CardType.VISA;
         return toResponse(createAndSaveCard(account, client, limit, cardType));
@@ -191,11 +211,47 @@ public class CardServiceImpl implements CardService {
         }
     }
 
+    /**
+     * P2.3 — alocira slot 1 ili 2 za novu karticu. Slot je deo
+     * partial UNIQUE INDEX-a (account_id, client_id, card_slot) gde
+     * status != 'DEACTIVATED' — DB-level enforcement preventiva za
+     * race-condition (dva paralelna createCard mogu da prodju kroz
+     * service-level checkCardLimit ali DB ce odbiti drugi insert).
+     *
+     * @return 1 ili 2 (uvek 1 za poslovne, 1 ili 2 za licne)
+     * @throws RuntimeException ako su svi slotovi zauzeti
+     */
+    private int allocateSlot(Account account, Client client) {
+        boolean isBusiness = account.getAccountType() == AccountType.BUSINESS;
+        // Aktivne kartice ZA TAJ par (account, client) — slotovi su per-par-ovi.
+        List<Card> existing = cardRepository.findByAccountIdAndClientIdAndStatusNot(
+                account.getId(), client.getId(), CardStatus.DEACTIVATED);
+        java.util.Set<Integer> taken = existing.stream()
+                .map(Card::getCardSlot)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (isBusiness) {
+            // Poslovni: slot uvek 1 (max 1 kartica po osobi)
+            if (taken.contains(1)) {
+                throw new RuntimeException("Ovlasceno lice vec ima karticu za ovaj poslovni racun (slot 1 zauzet)");
+            }
+            return 1;
+        }
+
+        // Licni: 1 ili 2
+        if (!taken.contains(1)) return 1;
+        if (!taken.contains(2)) return 2;
+        throw new RuntimeException("Dostignut maksimalan broj kartica za ovaj racun (2)");
+    }
+
     private Card createAndSaveCard(Account account, Client client, BigDecimal limit, CardType cardType) {
         String cardNumber;
         do {
             cardNumber = Card.generateCardNumber(cardType);
         } while (cardRepository.findByCardNumber(cardNumber).isPresent());
+
+        int slot = allocateSlot(account, client);
 
         Card card = Card.builder()
                 .cardNumber(cardNumber)
@@ -205,6 +261,7 @@ public class CardServiceImpl implements CardService {
                 .account(account)
                 .client(client)
                 .cardLimit(limit)
+                .cardSlot(slot)
                 .status(CardStatus.ACTIVE)
                 .createdAt(LocalDate.now())
                 .expirationDate(LocalDate.now().plusYears(4))
@@ -281,5 +338,23 @@ public class CardServiceImpl implements CardService {
             email = principal.toString();
         }
         return clientRepository.findByEmail(email).orElse(null);
+    }
+
+    private void requireAuthenticated() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getPrincipal() == null) {
+            throw new RuntimeException("Klijent nije pronadjen");
+        }
+    }
+
+    private boolean isCallerEmployeeOrAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getAuthorities() == null) return false;
+        return auth.getAuthorities().stream().anyMatch(a -> {
+            String role = a.getAuthority();
+            return "ROLE_ADMIN".equals(role) || "ROLE_EMPLOYEE".equals(role)
+                    || "ADMIN".equals(role) || "EMPLOYEE".equals(role)
+                    || "SUPERVISOR".equals(role);
+        });
     }
 }

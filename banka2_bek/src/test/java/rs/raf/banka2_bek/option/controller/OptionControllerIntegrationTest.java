@@ -140,10 +140,10 @@ class OptionControllerIntegrationTest {
         accountRepository.save(bankAccount);
     }
 
-    // TODO: preexisting test setup issue — JWT authority resolution ne prepoznaje
-    // AGENT permisiju u integration test kontekstu. Manual flow radi (verifikovano
-    // kroz smoke test u Phase 12). Potrebno odvojeno debagovanje test harnessa.
-    @org.junit.jupiter.api.Disabled("Preexisting: test setup authority resolution, manual flow radi")
+    // Test je {@link Disabled} jer JWT authority resolution u test harness-u
+    // ne prepoznaje AGENT permisiju (manual flow je verifikovan kroz smoke test).
+    // Ostavljen je kao referenca dok se test setup ne stabilizuje.
+    @org.junit.jupiter.api.Disabled("Test harness authority resolution; manual flow radi")
     @Test
     void exerciseOption_returnsOkAndDecrementsOpenInterest_forAgentActuary() {
         Employee agent = createEmployee("agent@test.com", true, Set.of("AGENT"));

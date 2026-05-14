@@ -118,12 +118,22 @@ public class OrderServiceImpl implements OrderService {
                             "Racun fonda ne postoji: " + fund.getAccountId()));
         } else {
             fund = null;
+            // accountId je opcioni (vec validovan kao null-able na DTO-u zbog
+            // XOR sa fundId-jem). resolveTradingAccount handluje:
+            //   - accountId != null → konkretan racun
+            //   - accountId == null + zaposleni → automatski bankin trading racun u listing valuti
+            //   - accountId == null + klijent → 404 "Racun ne postoji: null"
             account = resolveTradingAccount(dto.getAccountId(), isEmployee, listingCurrencyCode);
         }
         Portfolio portfolio = null;
         if (direction == OrderDirection.SELL) {
+            // Fund SELL: hartija je u portfoliju sa user_role=FUND i user_id=fund.id,
+            // ne pod trenutnim supervizorom. Bez ovog branch-a BE bi rekao
+            // "Nemate ovu hartiju u portfoliju" iako fond stvarno ima hartiju.
+            Long lookupUserId = fund != null ? fund.getId() : userContext.userId();
+            String lookupUserRole = fund != null ? UserRole.FUND : userContext.userRole();
             portfolio = portfolioRepository
-                    .findByUserIdAndUserRoleAndListingIdForUpdate(userContext.userId(), userContext.userRole(), listing.getId())
+                    .findByUserIdAndUserRoleAndListingIdForUpdate(lookupUserId, lookupUserRole, listing.getId())
                     .orElseThrow(() -> new InsufficientHoldingsException(
                             "Nemate ovu hartiju u portfoliju"));
             int available = portfolio.getAvailableQuantity();

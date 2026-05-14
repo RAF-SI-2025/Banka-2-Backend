@@ -4,12 +4,14 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.auth.util.UserRole;
 import rs.raf.banka2_bek.investmentfund.service.FundLiquidationService;
+import rs.raf.banka2_bek.order.event.OrderCompletedEvent;
 import rs.raf.banka2_bek.order.model.Order;
 import rs.raf.banka2_bek.order.model.OrderDirection;
 import rs.raf.banka2_bek.order.model.OrderStatus;
@@ -40,34 +42,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * Simulira izvrsavanje naloga na berzi koristeci parcijalno punjenje (partial fills).
  * Podrzava: MARKET, LIMIT, AON (all-or-none), after-hours naloge.
  *
- * P3-FOLLOWUP TODO — ORDER FUND-OWNERSHIP NA COMMIT-SIDE-U:
- *   Spec Celina 4 (Nova) §3883-3964: kad supervizor kupi hartiju u ime fonda,
- *   po commit-u tog ordera:
- *     a) sredstva moraju biti skinuta sa fund.account (RSD), ne sa supervizorovog
- *        bankinog racuna. order.reservedAccountId vec pokazuje na fund.account
- *        (postavljeno u OrderServiceImpl.createOrder kad je fundId != null), pa
- *        FundReservationService.reserveForBuy/release radi pravilno BEZ izmene.
- *     b) hartije moraju ici u FOND portfolio (NE supervizora). Trenutno
- *        updatePortfolio koristi userId=order.userId, userRole=order.userRole —
- *        za supervizora to je njegov licni portfolio (userId=employee.id,
- *        userRole='EMPLOYEE'). Za fund order MORA biti:
- *          userId = order.fundId
- *          userRole = "FUND"  (ili sl. discriminator — videti UserRole TODO ispod)
- *     c) tax obracun (TaxService) trenutno ne tretira fund-orderi posebno —
- *        treba odluciti: ulaze li u tax aktuara (NE), banke (DA preko ownerClient),
- *        ili fonda (NE direktno). Najlogicnije: skip u TaxService ako fundId != null,
- *        a tax za bankine fond pozicije ide kroz P9 ownerClient.
+ * Fund-ownership flow (Celina 4 (Nova) §3883-3964): kad supervizor kupi hartiju u
+ * ime fonda, fund-ovi commit ide kroz {@code Portfolio} sa {@code userRole="FUND"}
+ * + {@code userId=fund.id}. Sredstva se skidaju sa {@code fund.account} (postavljeno
+ * u OrderServiceImpl.createOrder kad je {@code fundId != null}). Tax obracun
+ * preskace fund-ordere (vidi {@code TaxService.calculateTaxForAllUsers} fundId filter).
  *
- * UserRole TODO (P3-followup zavisnost):
- *   `auth.util.UserRole` ima samo CLIENT i EMPLOYEE. Za fund-vlasnistvo treba:
- *     Opcija A: dodati UserRole.FUND = "FUND" (najmanje invazivno, koristi
- *               postojece Portfolio entitet sa userId=fundId, userRole='FUND')
- *     Opcija B: poseban entitet `FundHolding(fundId, listingId, quantity,
- *               avgBuyPrice, acquisitionDate)` i mapirati holdings u FundDetailsPage
- *     Opcija C: prosiriti Portfolio.fundId Long polje (uz user* polja koji
- *               bivaju null u tom slucaju)
- *   Preporuka: Opcija A (minimalno invazivno + iskoriscavanje postojeceg flow-a).
- *   Pre implementacije OrderExecutionService fund flow-a, BE tim mora da odluci.
  * STOP i STOP_LIMIT nalozi se ovde NE izvrsavaju — oni se prvo aktiviraju
  * u StopOrderActivationService pa postaju MARKET/LIMIT.
  *
@@ -90,6 +70,7 @@ public class OrderExecutionService {
     private final AonValidationService aonValidationService;
     private final FundReservationService fundReservationService;
     private final FundLiquidationService fundLiquidationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${bank.registration-number}")
     private String bankRegistrationNumber;
@@ -232,6 +213,7 @@ public class OrderExecutionService {
             order.setLastModification(LocalDateTime.now());
             releaseReservationSafe(order);
             orderRepository.save(order);
+            publishOrderCompleted(order);
             return;
         }
 
@@ -253,7 +235,7 @@ public class OrderExecutionService {
                 .multiply(contractSize)
                 .setScale(4, RoundingMode.HALF_UP);
 
-        boolean isEmployee = UserRole.isEmployee(order.getUserRole());
+        boolean isEmployee = UserRole.isEmployee(order.getUserRole()) || UserRole.FUND.equals(order.getUserRole());
         BigDecimal commissionInListing = isEmployee
                 ? BigDecimal.ZERO
                 : calculateCommission(totalPriceInListing, order.getOrderType());
@@ -325,6 +307,7 @@ public class OrderExecutionService {
         // 6. Ažurirati nalog
         order.setRemainingPortions(order.getRemainingPortions() - fillQuantity);
         order.setLastModification(LocalDateTime.now());
+        boolean justCompleted = false;
         if (order.getRemainingPortions() <= 0) {
             order.setDone(true);
             order.setStatus(OrderStatus.DONE);
@@ -332,6 +315,7 @@ public class OrderExecutionService {
             // Ako je ostao visak rezervacije (npr. fill po nizoj ceni od approxPrice)
             // vrati ga na availableBalance / availableQuantity.
             releaseReservationSafe(order);
+            justCompleted = true;
         } else {
             // Spec: vremenski interval izmedju fill-ova =
             //   Random(0, 24 * 60 / (volume / remaining)) sekundi
@@ -347,6 +331,28 @@ public class OrderExecutionService {
         if ("FUND".equals(order.getUserRole())) {
             log.info("T9 Hook: Detektovan nalog fonda #{}. Pokrecem resolve pending transakcija.", order.getUserId());
             fundLiquidationService.onFillCompleted(order.getId());
+        }
+
+        if (justCompleted) {
+            publishOrderCompleted(order);
+        }
+    }
+
+    /**
+     * Emit-uje {@link OrderCompletedEvent} kad order zavrsi (status DONE).
+     * Konzumenti (npr. {@code ProfitBankCacheEvictionListener}) invalidiraju
+     * cached izvedena polja.
+     */
+    private void publishOrderCompleted(Order order) {
+        try {
+            eventPublisher.publishEvent(new OrderCompletedEvent(
+                    order.getId(),
+                    order.getUserId(),
+                    order.getUserRole(),
+                    order.getFundId()));
+        } catch (RuntimeException ex) {
+            // Ne sme da pukne order fill flow zbog event-a — log i nastavi.
+            log.warn("Order #{} completed event publish failed: {}", order.getId(), ex.getMessage());
         }
     }
 

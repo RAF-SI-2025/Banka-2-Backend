@@ -72,8 +72,12 @@ public class ClientServiceImpl implements ClientService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<ClientResponseDto> getClients(int page, int limit, String firstName, String lastName, String email) {
+    public Page<ClientResponseDto> getClients(int page, int limit, String firstName, String lastName, String email, String search) {
         PageRequest pageRequest = PageRequest.of(page, limit, Sort.by("lastName").ascending());
+        if (search != null && !search.isBlank()) {
+            return clientRepository.findByUnifiedSearch(search.trim(), pageRequest)
+                    .map(this::toResponse);
+        }
         return clientRepository.findByFilters(firstName, lastName, email, pageRequest)
                 .map(this::toResponse);
     }

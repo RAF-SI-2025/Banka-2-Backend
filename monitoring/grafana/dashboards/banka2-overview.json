@@ -1,0 +1,145 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Pregled Banka 2 backend-a — JVM, HTTP saobracaj, poslovne metrike i sigurnosni signali.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Backend status",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "targets": [{"expr": "up{job=\"banka2_backend\"}", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+            {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+          ],
+          "color": {"mode": "thresholds"}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "targets": [{"expr": "process_uptime_seconds{job=\"banka2_backend\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "type": "stat",
+      "title": "HTTP req / s (5min avg)",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{job=\"banka2_backend\"}[5m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "type": "stat",
+      "title": "5xx error rate (5m)",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "targets": [{
+        "expr": "sum(rate(http_server_requests_seconds_count{job=\"banka2_backend\",status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"banka2_backend\"}[5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 0.01},
+              {"color": "red", "value": 0.10}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP request latency (p50 / p95 / p99)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"banka2_backend\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"banka2_backend\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"banka2_backend\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP req/s po status klasi",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [{
+        "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"banka2_backend\"}[5m]))",
+        "legendFormat": "{{status}}",
+        "refId": "A"
+      }],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap upotreba",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {"expr": "sum(jvm_memory_used_bytes{job=\"banka2_backend\",area=\"heap\"})", "legendFormat": "used", "refId": "A"},
+        {"expr": "sum(jvm_memory_max_bytes{job=\"banka2_backend\",area=\"heap\"})", "legendFormat": "max", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "DB connection pool (HikariCP)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "hikaricp_connections_active{job=\"banka2_backend\"}", "legendFormat": "active", "refId": "A"},
+        {"expr": "hikaricp_connections_idle{job=\"banka2_backend\"}", "legendFormat": "idle", "refId": "B"},
+        {"expr": "hikaricp_connections_max{job=\"banka2_backend\"}", "legendFormat": "max", "refId": "C"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Poslovne metrike: order izvrsenja",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [{
+        "expr": "rate(banka2_orders_executed_total[5m])",
+        "legendFormat": "orders/s",
+        "refId": "A"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Sigurnosni signali",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {"expr": "rate(banka2_login_failure_total[5m])", "legendFormat": "neuspele login (login_failure)", "refId": "A"},
+        {"expr": "rate(banka2_login_success_total[5m])", "legendFormat": "uspele login (login_success)", "refId": "B"},
+        {"expr": "rate(banka2_rate_limit_hit_total[5m])", "legendFormat": "rate-limit hit", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["banka2", "overview"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Banka 2 — pregled",
+  "uid": "banka2-overview",
+  "version": 1
+}

@@ -1,5 +1,7 @@
 package rs.raf.banka2_bek.employee.service;
 
+import rs.raf.banka2_bek.employee.dto.ActivationTokenStatusDto;
+
 /**
  * Service for authentication and account activation.
  */
@@ -16,4 +18,15 @@ public interface EmployeeAuthService {
      * @throws IllegalStateException    if the account is already active
      */
     void activateAccount(String tokenValue, String newPassword);
+
+    /**
+     * Vraca stanje aktivacionog tokena. FE poziva ovo na mount-u
+     * {@code ActivateAccountPage} da bi sprecio renderovanje forme kad
+     * je token vec iskoriscen ili istekao (Bug Scenario 9 Tim 1).
+     *
+     * Nikad ne baca exception — uvek vrati DTO sa statusom (VALID, USED,
+     * EXPIRED, INVALID, ALREADY_ACTIVE). Endpoint je javan (bez auth-a)
+     * jer ga zove neaktivirani zaposleni preko email linka.
+     */
+    ActivationTokenStatusDto getTokenStatus(String tokenValue);
 }

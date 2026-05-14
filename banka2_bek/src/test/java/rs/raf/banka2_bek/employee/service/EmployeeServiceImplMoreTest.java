@@ -133,13 +133,14 @@ class EmployeeServiceImplMoreTest {
 
     @Test
     void updateEmployeeUpdatesAllFields() {
+        // Spec §30 + Bug T1-010 (12.05.2026): email read-only. Test sad koristi
+        // isti email (idempotent — BE prihvata) i menja sva ostala polja.
         Employee e = buildEmployee(5L, "old@x.com", Set.of("VIEW_STOCKS"), true);
         when(employeeRepository.findById(5L)).thenReturn(Optional.of(e));
-        when(employeeRepository.existsByEmailAndIdNot("new@x.com", 5L)).thenReturn(false);
         when(employeeRepository.save(any(Employee.class))).thenAnswer(i -> i.getArgument(0));
 
         UpdateEmployeeRequestDto r = new UpdateEmployeeRequestDto();
-        r.setEmail("new@x.com");
+        r.setEmail("old@x.com"); // isti email — no-op
         r.setFirstName("NF"); r.setLastName("NL");
         r.setDateOfBirth(LocalDate.of(2000, 2, 2));
         r.setGender("F"); r.setPhone("+999"); r.setAddress("NewAddr");
@@ -149,7 +150,7 @@ class EmployeeServiceImplMoreTest {
 
         EmployeeResponseDto resp = employeeService.updateEmployee(5L, r);
 
-        assertThat(resp.getEmail()).isEqualTo("new@x.com");
+        assertThat(resp.getEmail()).isEqualTo("old@x.com");
         assertThat(resp.getFirstName()).isEqualTo("NF");
         assertThat(resp.getLastName()).isEqualTo("NL");
         assertThat(resp.getDateOfBirth()).isEqualTo(LocalDate.of(2000, 2, 2));
@@ -186,16 +187,17 @@ class EmployeeServiceImplMoreTest {
     }
 
     @Test
-    void updateEmployeeEmailWithoutConflictSucceeds() {
+    void updateEmployeeEmailChangeIsRejected() {
+        // Bug T1-010 (12.05.2026): pokusaj promene email-a na drugi vrednost
+        // se odbija sa IllegalArgumentException — email je identitet zaposlenog.
         Employee e = buildEmployee(7L, "a@a.com", Set.of("VIEW_STOCKS"), true);
         when(employeeRepository.findById(7L)).thenReturn(Optional.of(e));
-        when(employeeRepository.existsByEmailAndIdNot("b@b.com", 7L)).thenReturn(false);
-        when(employeeRepository.save(any(Employee.class))).thenAnswer(i -> i.getArgument(0));
 
         UpdateEmployeeRequestDto r = new UpdateEmployeeRequestDto();
-        r.setEmail("b@b.com");
-        EmployeeResponseDto resp = employeeService.updateEmployee(7L, r);
-        assertThat(resp.getEmail()).isEqualTo("b@b.com");
+        r.setEmail("b@b.com"); // razlicit email — odbija se
+        assertThatThrownBy(() -> employeeService.updateEmployee(7L, r))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Email zaposlenog se ne moze menjati");
     }
 
     @Test

@@ -33,11 +33,11 @@ class JwtServiceTest {
     // ============================================================
 
     private Claims parseClaims(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(KEY)
+        return Jwts.parser()
+                .verifyWith(KEY)
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     // ============================================================

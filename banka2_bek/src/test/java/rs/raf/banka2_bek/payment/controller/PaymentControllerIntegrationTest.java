@@ -252,7 +252,8 @@ class PaymentControllerIntegrationTest {
         assertThat(toAfter.getAvailableBalance()).isEqualByComparingTo("608.00000");
 
         assertThat(paymentRepository.count()).isEqualTo(1);
-        assertThat(transactionRepository.count()).isEqualTo(2);
+        // T2-013 (14.05.2026): cross-currency sad pise 3-fazni lanac (6 transaction redova).
+        assertThat(transactionRepository.count()).isEqualTo(6);
     }
 
     @Test

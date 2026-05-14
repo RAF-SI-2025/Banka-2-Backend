@@ -5,59 +5,39 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
+import rs.raf.banka2_bek.auth.util.UserContext;
+import rs.raf.banka2_bek.auth.util.UserResolver;
 import rs.raf.banka2_bek.investmentfund.dto.InvestmentFundDtos.*;
 import rs.raf.banka2_bek.investmentfund.service.InvestmentFundService;
 
 import java.time.LocalDate;
 import java.util.List;
 
-/*
-================================================================================
- TODO — REST ENDPOINTI ZA INVESTICIONE FONDOVE
- Zaduzen: BE tim
---------------------------------------------------------------------------------
- ENDPOINTI I SECURITY:
-   GET   /funds                      authenticated (klijenti + aktuari; discovery)
-   GET   /funds/{id}                 authenticated (detalj)
-   GET   /funds/{id}/performance     authenticated
-   GET   /funds/{id}/transactions    authenticated (audit; supervizori svi, klijenti samo svoj fond-id pair)
-   POST  /funds                      ADMIN, SUPERVISOR (create)
-   POST  /funds/{id}/invest          authenticated (klijent iz svog racuna; supervizor iz bankinog)
-   POST  /funds/{id}/withdraw        authenticated (klijent sa svoje pozicije; supervizor sa bankine)
-   GET   /funds/my-positions         authenticated (moji udeli)
-   GET   /funds/bank-positions       ADMIN, SUPERVISOR (za Profit Banke portal)
-
- SECURITY napomena:
-  - "/funds" i "/funds/**" dodati u GlobalSecurityConfig pod authenticated.
-  - POST /funds ima @PreAuthorize("hasAnyRole('ADMIN','EMPLOYEE')") dodatno
-    proveri u service da je SUPERVISOR po ActuaryInfo.
-
- ERROR HANDLING:
-  - @RestControllerAdvice InvestmentFundExceptionHandler u istoj paketi.
-  - EntityNotFoundException -> 404
-  - IllegalArgumentException -> 400
-  - InsufficientFundsException -> 400
-  - AccessDeniedException -> 403
-================================================================================
-*/
 @RestController
 @RequestMapping("/funds")
 @RequiredArgsConstructor
 public class InvestmentFundController {
 
     private final InvestmentFundService investmentFundService;
-    private final EmployeeRepository employeeRepository;
+    private final UserResolver userResolver;
 
     @GetMapping
     public ResponseEntity<List<InvestmentFundSummaryDto>> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String sort,
-            @RequestParam(required = false) String direction) {
-        return ResponseEntity.ok(investmentFundService.listDiscovery(search, sort, direction));
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) java.math.BigDecimal minContribution,
+            @RequestParam(required = false) java.math.BigDecimal maxContribution,
+            @RequestParam(required = false) java.math.BigDecimal minFundValue,
+            @RequestParam(required = false) java.math.BigDecimal maxFundValue,
+            @RequestParam(required = false) java.math.BigDecimal minProfit,
+            @RequestParam(required = false) java.math.BigDecimal maxProfit) {
+        return ResponseEntity.ok(investmentFundService.listDiscovery(
+                search, sort, direction,
+                minContribution, maxContribution,
+                minFundValue, maxFundValue,
+                minProfit, maxProfit));
     }
 
     @GetMapping("/{id}")
@@ -69,51 +49,66 @@ public class InvestmentFundController {
     public ResponseEntity<List<FundPerformancePointDto>> performance(
             @PathVariable Long id,
             @RequestParam(required = false) LocalDate from,
-            @RequestParam(required = false) LocalDate to) {
-        throw new UnsupportedOperationException("TODO");
+            @RequestParam(required = false) LocalDate to,
+            @RequestParam(required = false, defaultValue = "MONTH") Granularity granularity) {
+        LocalDate effectiveTo = to != null ? to : LocalDate.now();
+        LocalDate effectiveFrom = from != null ? from : effectiveTo.minusMonths(3);
+        return ResponseEntity.ok(investmentFundService.getPerformance(id, effectiveFrom, effectiveTo, granularity));
     }
 
     @GetMapping("/{id}/transactions")
     public ResponseEntity<List<ClientFundTransactionDto>> transactions(@PathVariable Long id) {
-        throw new UnsupportedOperationException("TODO");
+        UserContext current = userResolver.resolveCurrent();
+        return ResponseEntity.ok(investmentFundService.listTransactions(id, current.userId(), current.userRole()));
     }
 
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN', 'SUPERVISOR')")
     public ResponseEntity<InvestmentFundDetailDto> create(@Valid @RequestBody CreateFundDto dto) {
-        Long supervisorId = getCurrentEmployeeId();
+        UserContext current = userResolver.resolveCurrent();
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(investmentFundService.createFund(dto, supervisorId));
+                .body(investmentFundService.createFund(dto, current.userId()));
     }
 
     @PostMapping("/{id}/invest")
     public ResponseEntity<ClientFundPositionDto> invest(
             @PathVariable Long id, @Valid @RequestBody InvestFundDto dto) {
-        throw new UnsupportedOperationException("TODO");
+        UserContext current = userResolver.resolveCurrent();
+        return ResponseEntity.ok(investmentFundService.invest(id, dto, current.userId(), current.userRole()));
     }
 
     @PostMapping("/{id}/withdraw")
     public ResponseEntity<ClientFundTransactionDto> withdraw(
             @PathVariable Long id, @Valid @RequestBody WithdrawFundDto dto) {
-        throw new UnsupportedOperationException("TODO");
+        UserContext current = userResolver.resolveCurrent();
+        return ResponseEntity.ok(investmentFundService.withdraw(id, dto, current.userId(), current.userRole()));
     }
 
     @GetMapping("/my-positions")
     public ResponseEntity<List<ClientFundPositionDto>> myPositions() {
-        throw new UnsupportedOperationException("TODO");
+        UserContext current = userResolver.resolveCurrent();
+        return ResponseEntity.ok(investmentFundService.listMyPositions(current.userId(), current.userRole()));
     }
 
     @GetMapping("/bank-positions")
     @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN', 'SUPERVISOR')")
     public ResponseEntity<List<ClientFundPositionDto>> bankPositions() {
-        throw new UnsupportedOperationException("TODO");
+        return ResponseEntity.ok(investmentFundService.listBankPositions());
     }
 
-    private Long getCurrentEmployeeId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String email = auth.getName();
-        return employeeRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalStateException("Employee with email " + email + " not found."))
-                .getId();
+    /**
+     * Ad-hoc prebacivanje vlasnistva fonda na drugog supervizora.
+     * Samo admin (Celina 4 §324: "samo admini mogu da dodaju i uklanjaju
+     * permisije isAgent, isSupervisor"). Bulk varijanta (kad admin oduzme
+     * isSupervisor permisiju) se i dalje desava automatski kroz
+     * {@code EmployeeServiceImpl.updateEmployee}.
+     */
+    @PostMapping("/{id}/reassign-manager")
+    @PreAuthorize("hasAnyAuthority('ROLE_ADMIN', 'ADMIN')")
+    public ResponseEntity<InvestmentFundDetailDto> reassignManager(
+            @PathVariable Long id,
+            @Valid @RequestBody ReassignFundManagerDto dto) {
+        return ResponseEntity.ok(
+                investmentFundService.reassignSingleFundManager(id, dto.getNewManagerEmployeeId()));
     }
 }

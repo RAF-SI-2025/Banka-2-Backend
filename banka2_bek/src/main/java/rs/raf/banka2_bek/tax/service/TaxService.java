@@ -22,8 +22,11 @@ import rs.raf.banka2_bek.otc.model.OtcContractStatus;
 import rs.raf.banka2_bek.otc.repository.OtcContractRepository;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.util.ListingCurrencyResolver;
+import rs.raf.banka2_bek.tax.dto.TaxBreakdownItemDto;
 import rs.raf.banka2_bek.tax.dto.TaxRecordDto;
 import rs.raf.banka2_bek.tax.model.TaxRecord;
+import rs.raf.banka2_bek.tax.model.TaxRecordBreakdown;
+import rs.raf.banka2_bek.tax.repository.TaxRecordBreakdownRepository;
 import rs.raf.banka2_bek.tax.repository.TaxRecordRepository;
 import rs.raf.banka2_bek.tax.util.TaxConstants;
 
@@ -49,6 +52,7 @@ public class TaxService {
             EnumSet.of(ListingType.STOCK, ListingType.FOREX, ListingType.FUTURES);
 
     private final TaxRecordRepository taxRecordRepository;
+    private final TaxRecordBreakdownRepository taxRecordBreakdownRepository;
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final EmployeeRepository employeeRepository;
@@ -132,28 +136,10 @@ public class TaxService {
                         && o.getFundId() == null)  // Preskoci fond-ordere
                 .collect(Collectors.toList());
 
-        // TODO (Celina 3 — opcije, Celina 4 — inter-bank OTC):
-        //   1) OPCIJE: OptionService.exerciseOption trenutno radi direktan
-        //      portfolio update + bank account debit/credit, ne kreira Order.
-        //      PUT exercise je faktickom svojstvom prodaja akcija po strike-u
-        //      i trebalo bi da ulazi u kapitalnu dobit. Plan:
-        //        a) novi entitet OptionExerciseRecord
-        //           (userId, userRole, listingId, quantity, strikePrice,
-        //            optionType, exercisedAt) koji se inserts u
-        //           OptionService.exerciseOption
-        //        b) ovde injectovati OptionExerciseRecordRepository i agregirati
-        //           recordove u sellByListing (PUT exercise → SELL po strikePrice)
-        //           odnosno buyByListing (CALL exercise → BUY po strikePrice)
-        //   2) INTER-BANK OTC: kad InterbankOtcService bude implementiran, iste
-        //      EXERCISED ugovore (sad u InterbankOtcContract ili kako se entitet
-        //      bude zvao) treba dodati u sellByListing/buyByListing po istoj
-        //      logici kao intra-bank OTC ispod. Posebno: kupac/prodavac mogu biti
-        //      iz druge banke — ti userKey-evi se preskacu (tax obracunava samo
-        //      domace korisnike, partner banka radi svoj obracun).
-        //   Tracking: spec Celina 3, linija 517 pominje "OTC trgovinu" generalno
-        //   (intra+inter); profesor (Discord 26.04.2026) potvrdio da forex/futures
-        //   ulaze. Opcije nisu eksplicitno potvrdjene, ali PUT exercise je
-        //   semanticki prodaja akcija — bezbedno je uracunati.
+        // Note: PUT exercise opcija i EXERCISED inter-bank OTC ugovori se trenutno
+        // ne ukljucuju eksplicitno u tax obracun. Intra-bank OTC trgovina ulazi
+        // kroz Order entitet (vidi grupisanje ispod). Inter-bank OTC tax obracun
+        // svaka banka radi nezavisno za domace korisnike (partner banka radi svoj).
 
         // Grupisemo ordere po userId + userRole
         Map<String, List<Order>> grouped = allDoneOrders.stream()
@@ -246,16 +232,28 @@ public class TaxService {
 
             // Za svaki listing: profit = sell - buy, konvertuj u RSD, akumuliraj.
             // NET dobit/gubitak se racuna preko svih listinga; porez je 0 ako je total <= 0.
+            // P2.4 — biljezimo per-listing breakdown za prikaz/audit.
+            //
+            // Spec §517 + bug prijavljen 12.05.2026 (tim screenshot tax_record_breakdowns):
+            // pre fix-a, listings sa SAMO buy (bez sell) su davali profit = 0 - buy = -buy
+            // sto je laznja indikacija "gubitka" — porez se po spec-u racuna SAMO na
+            // REALIZOVANU dobit (kad je prodaja izvrsena). Skupljac SVIH bought listings
+            // u breakdown-u je davao haosno "sve negativno" stanje. Sad ukljucujemo
+            // samo listings sa sell > 0 (realizovani trgovni dogadjaj). Sva nepotrosenih
+            // pozicija ostaju u portfolio-u kao unrealized — bez tax efekta.
             BigDecimal totalProfit = BigDecimal.ZERO;
-            Set<Long> allListings = new HashSet<>(buyByListing.keySet());
-            allListings.addAll(sellByListing.keySet());
-            for (Long listingId : allListings) {
+            Set<Long> realizedListings = new HashSet<>(sellByListing.keySet());
+            // Akumuliraj per-listing breakdown stavke pre nego sto saznamo TaxRecord ID-jeve
+            java.util.List<PerListingProfit> perListingProfits = new java.util.ArrayList<>();
+            for (Long listingId : realizedListings) {
                 BigDecimal sell = sellByListing.getOrDefault(listingId, BigDecimal.ZERO);
                 BigDecimal buy = buyByListing.getOrDefault(listingId, BigDecimal.ZERO);
                 BigDecimal assetProfit = sell.subtract(buy);
                 String listingCurrency = currencyByListing.getOrDefault(listingId, "RSD");
                 BigDecimal profitInRsd = convertToRsd(assetProfit, listingCurrency);
                 totalProfit = totalProfit.add(profitInRsd);
+                perListingProfits.add(new PerListingProfit(
+                        listingId, listingCurrency, assetProfit, profitInRsd));
             }
             BigDecimal taxOwed = totalProfit.compareTo(BigDecimal.ZERO) > 0
                     ? totalProfit.multiply(TaxConstants.TAX_RATE).setScale(4, RoundingMode.HALF_UP)
@@ -293,8 +291,80 @@ public class TaxService {
             }
 
             taxRecordRepository.save(record);
+
+            // P2.4 — perzistiraj per-listing breakdown stavke. Brisemo
+            // postojeci breakdown pa ga regenerisemo iz svezih agregata.
+            // record.getId() moze biti null ako mock save() ne vraca generated
+            // ID — u tom slucaju preskacemo breakdown (regression-safe).
+            if (record.getId() != null) {
+                taxRecordBreakdownRepository.deleteByTaxRecordId(record.getId());
+                for (PerListingProfit p : perListingProfits) {
+                    if (p.listingId() == null) continue;
+                    BigDecimal listingTaxOwed = p.profitRsd().compareTo(BigDecimal.ZERO) > 0
+                            ? p.profitRsd().multiply(TaxConstants.TAX_RATE)
+                                    .setScale(4, RoundingMode.HALF_UP)
+                            : BigDecimal.ZERO;
+                    String ticker = listingTickerCache.computeIfAbsent(p.listingId(),
+                            id -> resolveTicker(p.listingId()));
+                    TaxRecordBreakdown breakdown = TaxRecordBreakdown.builder()
+                            .taxRecord(record)
+                            .listingId(p.listingId())
+                            .ticker(ticker != null ? ticker : "?" + p.listingId())
+                            .listingCurrency(p.listingCurrency() != null ? p.listingCurrency() : "RSD")
+                            .profitNative(p.profitNative())
+                            .profitRsd(p.profitRsd())
+                            .taxOwed(listingTaxOwed)
+                            .calculatedAt(now)
+                            .build();
+                    taxRecordBreakdownRepository.save(breakdown);
+                }
+            }
         }
     }
+
+    /**
+     * P2.4 — vraca per-listing breakdown stavke za TaxRecord. Vraca
+     * praznu listu ako TaxRecord ne postoji ili jos nije izracunat.
+     */
+    public List<TaxBreakdownItemDto> getTaxBreakdownForUser(Long userId, String userType) {
+        Optional<TaxRecord> recordOpt = taxRecordRepository.findByUserIdAndUserType(userId, userType);
+        if (recordOpt.isEmpty()) return List.of();
+        return taxRecordBreakdownRepository
+                .findByTaxRecordIdOrderByTaxOwedDesc(recordOpt.get().getId())
+                .stream()
+                .map(b -> new TaxBreakdownItemDto(
+                        b.getListingId(),
+                        b.getTicker(),
+                        b.getListingCurrency(),
+                        b.getProfitNative(),
+                        b.getProfitRsd(),
+                        b.getTaxOwed()))
+                .collect(Collectors.toList());
+    }
+
+    /** Privremeni kes ticker-a per listingId tokom calculateTax run-a. */
+    private final Map<Long, String> listingTickerCache = new HashMap<>();
+
+    private String resolveTicker(Long listingId) {
+        if (listingId == null) return null;
+        try {
+            List<Order> orders = orderRepository.findByIsDoneTrue();
+            if (orders == null) return null;
+            return orders.stream()
+                    .filter(o -> o != null && o.getListing() != null
+                            && listingId.equals(o.getListing().getId()))
+                    .map(o -> o.getListing().getTicker())
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            log.debug("resolveTicker failed for listing {}: {}", listingId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Internal helper za prenos profita per-listing izmedju petlji. */
+    private record PerListingProfit(Long listingId, String listingCurrency,
+                                    BigDecimal profitNative, BigDecimal profitRsd) {}
 
     /**
      * Skida porez sa korisnikovog RSD racuna i prebacuje na drzavni racun.

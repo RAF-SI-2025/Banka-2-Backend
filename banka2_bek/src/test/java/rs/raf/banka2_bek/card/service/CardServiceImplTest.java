@@ -73,9 +73,15 @@ class CardServiceImplTest {
         UserDetails userDetails = User.builder()
                 .username(email).password("pass").authorities("ROLE_CLIENT").build();
         Authentication auth = mock(Authentication.class);
-        when(auth.getPrincipal()).thenReturn(userDetails);
+        // SC28/T2-007 fix (14.05.2026): createCard sad prvo proverava isCallerEmployeeOrAdmin()
+        // koja cita auth.getAuthorities(). Stubovi getPrincipal/getAuthentication su lenient
+        // jer ih neki test putevi (npr. accountNotFound) ne zovu.
+        org.mockito.Mockito.lenient().when(auth.getPrincipal()).thenReturn(userDetails);
+        java.util.Collection<org.springframework.security.core.GrantedAuthority> auths =
+                java.util.Collections.singletonList(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_CLIENT"));
+        org.mockito.Mockito.lenient().when(((Authentication) auth).getAuthorities()).thenAnswer(inv -> auths);
         SecurityContext ctx = mock(SecurityContext.class);
-        when(ctx.getAuthentication()).thenReturn(auth);
+        org.mockito.Mockito.lenient().when(ctx.getAuthentication()).thenReturn(auth);
         SecurityContextHolder.setContext(ctx);
     }
 
@@ -659,7 +665,10 @@ class CardServiceImplTest {
         @DisplayName("baca gresku kad racun ne postoji")
         void accountNotFound() {
             mockAuth("stefan@test.com");
-            when(clientRepository.findByEmail("stefan@test.com")).thenReturn(Optional.of(client));
+            // clientRepository.findByEmail stub je lenient — accountNotFound test
+            // baca gresku PRE getAuthenticatedClient() poziva (sad se accountRepository.findById
+            // poziva prvi posle 14.05 SC28 fix-a).
+            org.mockito.Mockito.lenient().when(clientRepository.findByEmail("stefan@test.com")).thenReturn(Optional.of(client));
             when(accountRepository.findById(999L)).thenReturn(Optional.empty());
 
             CreateCardRequestDto dto = new CreateCardRequestDto();

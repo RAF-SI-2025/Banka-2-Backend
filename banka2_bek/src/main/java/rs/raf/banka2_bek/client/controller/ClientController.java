@@ -41,8 +41,9 @@ public class ClientController {
             @Parameter(description = "Page size") @RequestParam(defaultValue = "10") int limit,
             @Parameter(description = "Filter by first name") @RequestParam(required = false) String firstName,
             @Parameter(description = "Filter by last name") @RequestParam(required = false) String lastName,
-            @Parameter(description = "Filter by email") @RequestParam(required = false) String email) {
-        return ResponseEntity.ok(clientService.getClients(page, limit, firstName, lastName, email));
+            @Parameter(description = "Filter by email") @RequestParam(required = false) String email,
+            @Parameter(description = "Unified search across first name, last name, email and phone") @RequestParam(required = false) String search) {
+        return ResponseEntity.ok(clientService.getClients(page, limit, firstName, lastName, email, search));
     }
 
     @Operation(summary = "Get client by ID")

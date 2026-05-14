@@ -24,4 +24,17 @@ public interface ClientRepository extends JpaRepository<Client, Long> {
                                @Param("lastName") String lastName,
                                @Param("email") String email,
                                Pageable pageable);
+
+    /**
+     * Unified search: traci sve klijente kojima firstName/lastName/email/phone sadrzi search string.
+     * Koristi se kada FE salje single search input umesto razdvojenih polja (Sc 39 — Portal klijenata).
+     * Spec C2 §431 "Postoji filter na osnovu imena i prezimena, kao i mejla." plus phone bonus.
+     */
+    @Query("SELECT c FROM Client c WHERE "
+            + "(cast(:search as string) IS NULL OR "
+            + " LOWER(c.firstName) LIKE LOWER(CONCAT('%', cast(:search as string), '%')) OR "
+            + " LOWER(c.lastName) LIKE LOWER(CONCAT('%', cast(:search as string), '%')) OR "
+            + " LOWER(c.email) LIKE LOWER(CONCAT('%', cast(:search as string), '%')) OR "
+            + " LOWER(COALESCE(c.phone, '')) LIKE LOWER(CONCAT('%', cast(:search as string), '%')))")
+    Page<Client> findByUnifiedSearch(@Param("search") String search, Pageable pageable);
 }

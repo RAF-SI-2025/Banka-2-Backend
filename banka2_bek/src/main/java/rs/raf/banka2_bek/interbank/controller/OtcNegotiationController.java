@@ -1,114 +1,100 @@
 package rs.raf.banka2_bek.interbank.controller;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
 import rs.raf.banka2_bek.interbank.protocol.ForeignBankId;
 import rs.raf.banka2_bek.interbank.protocol.OtcNegotiation;
 import rs.raf.banka2_bek.interbank.protocol.OtcOffer;
 import rs.raf.banka2_bek.interbank.protocol.PublicStock;
 import rs.raf.banka2_bek.interbank.protocol.UserInformation;
+import rs.raf.banka2_bek.interbank.service.OtcNegotiationService;
 
 import java.util.List;
 
-/*
-================================================================================
- TODO — OTC NEGOTIATION + USER INFO ENDPOINT-i (PROTOKOL §3.1-3.7)
- Zaduzen: BE tim
- Spec ref: protokol §3 OTC negotiation protocol
---------------------------------------------------------------------------------
- ENDPOINT-i (sve auth-ovani sa X-Api-Key, §2.10):
-
-   GET  /public-stock                              — §3.1, lista javnih akcija
-   POST /negotiations                              — §3.2, kreiraj pregovor
-   GET  /negotiations/{routingNumber}/{id}         — §3.4, citaj pregovor
-   PUT  /negotiations/{routingNumber}/{id}         — §3.3, counter-offer
-   DELETE /negotiations/{routingNumber}/{id}       — §3.5, zatvori pregovor
-   GET  /negotiations/{routingNumber}/{id}/accept  — §3.6, prihvati ponudu
-   GET  /user/{routingNumber}/{id}                 — §3.7, friendly name
-
- NAPOMENA O CALLER-IMA:
-   Sve endpointe poziva DRUGA banka, ne nas FE. Nas FE poziva nase interne
-   API-je (npr. /api/otc/...) koji onda krose ka ovim endpoint-ima preko
-   InterbankClient-a.
-
- RESPONSES:
-   GET /public-stock                           -> 200 PublicStock[]
-   POST /negotiations                          -> 200 ForeignBankId
-   GET /negotiations/{rn}/{id}                 -> 200 OtcNegotiation, 404 ako ne postoji
-   PUT /negotiations/{rn}/{id}                 -> 204 No Content, 409 ako nije nas red ili zatvoren
-   DELETE /negotiations/{rn}/{id}              -> 204 No Content
-   GET /negotiations/{rn}/{id}/accept          -> 200 (sinhrono — ceka COMMITTED)
-   GET /user/{rn}/{id}                         -> 200 UserInformation, 404 ako ne postoji
-================================================================================
-*/
+/**
+ * Inbound endpoint-i za OTC pregovor protokol (§3.1–§3.7).
+ * Sve rute autentifikuje {@code InterbankAuthFilter} kroz {@code X-Api-Key} header
+ * (§2.10). Filter resolvuje partner banku i odbacuje neautorizovane zahteve sa 401.
+ */
 @RestController
+@RequiredArgsConstructor
 public class OtcNegotiationController {
 
-    // TODO: injectovati OtcNegotiationService, BankRoutingService
+    private final OtcNegotiationService negotiationService;
 
+    /** §3.1 — javne akcije za OTC discovery iz druge banke. */
     @GetMapping("/public-stock")
-    public ResponseEntity<List<PublicStock>> listPublicStocks(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey) {
-        // TODO: §3.1 + §2.10 auth
-        throw new UnsupportedOperationException("TODO: §3.1 GET /public-stock");
+    public ResponseEntity<List<PublicStock>> listPublicStocks() {
+        return ResponseEntity.ok(negotiationService.serveLocalPublicStocks());
     }
 
+    /** §3.2 — partner banka kreira pregovor; mi smo seller (autoritativni vlasnik). */
     @PostMapping("/negotiations")
-    public ResponseEntity<ForeignBankId> createNegotiation(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
-            @RequestBody OtcOffer offer) {
-        // TODO: §3.2 — auth, validacija (sellerId.routingNumber == nas), kreiraj
-        // local entity, vrati ForeignBankId(myRouting, generatedId)
-        throw new UnsupportedOperationException("TODO: §3.2 POST /negotiations");
+    public ResponseEntity<ForeignBankId> createNegotiation(@RequestBody OtcOffer offer) {
+        ForeignBankId id = negotiationService.acceptCreatedNegotiation(offer);
+        return ResponseEntity.ok(id);
     }
 
+    /** §3.4 — citaj trenutno stanje pregovora po (routingNumber, id). */
     @GetMapping("/negotiations/{routingNumber}/{id}")
     public ResponseEntity<OtcNegotiation> readNegotiation(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @PathVariable int routingNumber,
             @PathVariable String id) {
-        // TODO: §3.4 — auth, lookup po (routingNumber, id), vrati OtcNegotiation
-        throw new UnsupportedOperationException("TODO: §3.4 GET /negotiations/{rn}/{id}");
+        return ResponseEntity.ok(negotiationService.getNegotiation(new ForeignBankId(routingNumber, id)));
     }
 
+    /** §3.3 — counter-offer od strane druge banke; turn-rule provera u service-u. */
     @PutMapping("/negotiations/{routingNumber}/{id}")
     public ResponseEntity<Void> postCounterOffer(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @PathVariable int routingNumber,
             @PathVariable String id,
             @RequestBody OtcOffer offer) {
-        // TODO: §3.3 — auth, provera turn-a (lastModifiedBy != caller-cija banka),
-        // 409 ako nije nas red, update local entity
-        throw new UnsupportedOperationException("TODO: §3.3 PUT /negotiations/{rn}/{id}");
+        negotiationService.receiveCounterOffer(new ForeignBankId(routingNumber, id), offer);
+        return ResponseEntity.noContent().build();
     }
 
+    /** §3.5 — bilo koja strana zatvara pregovor (idempotentno). */
     @DeleteMapping("/negotiations/{routingNumber}/{id}")
     public ResponseEntity<Void> closeNegotiation(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @PathVariable int routingNumber,
             @PathVariable String id) {
-        // TODO: §3.5 — auth, postavi isOngoing=false
-        throw new UnsupportedOperationException("TODO: §3.5 DELETE /negotiations/{rn}/{id}");
+        negotiationService.closeReceivedNegotiation(new ForeignBankId(routingNumber, id));
+        return ResponseEntity.noContent().build();
     }
 
+    /**
+     * §3.6 — sinhrono prihvatanje. Vraca 204 No Content tek kad je 2PC committed
+     * (spec §3.6: "Response: Empty (204 No Content)"). Greska u 2PC se manifestuje
+     * kao izuzetak → 4xx/5xx u InterbankExceptionHandler-u.
+     */
     @GetMapping("/negotiations/{routingNumber}/{id}/accept")
     public ResponseEntity<Void> acceptNegotiation(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @PathVariable int routingNumber,
             @PathVariable String id) {
-        // TODO: §3.6 — auth, OtcNegotiationService.acceptReceivedNegotiation
-        // (sinhrono — vraca tek kad je transakcija COMMITTED, ili NO glas → error)
-        // §3.6.1 forma optionContract i salje TransactionExecutorService.execute
-        throw new UnsupportedOperationException("TODO: §3.6 GET /negotiations/{rn}/{id}/accept");
+        negotiationService.acceptReceivedNegotiation(new ForeignBankId(routingNumber, id));
+        return ResponseEntity.noContent().build();
     }
 
+    /**
+     * §3.7 — friendly ime za nas lokalni id. 404 Not Found ako id ne postoji
+     * (InterbankUserNotFoundException -> 404 kroz exception handler).
+     */
     @GetMapping("/user/{routingNumber}/{id}")
     public ResponseEntity<UserInformation> getUserInfo(
-            @RequestHeader(value = "X-Api-Key", required = false) String apiKey,
             @PathVariable int routingNumber,
             @PathVariable String id) {
-        // TODO: §3.7 — auth, OtcNegotiationService.serveUserInfo
-        // Ako routingNumber != nas → 404 (mi nismo autoritativni)
-        throw new UnsupportedOperationException("TODO: §3.7 GET /user/{rn}/{id}");
+        // Spec §3.7: ako routingNumber nije nas, 404 (mi nismo autoritativni za stranu banku).
+        if (routingNumber != negotiationService.requireMyRouting()) {
+            throw new rs.raf.banka2_bek.interbank.exception.InterbankExceptions
+                    .InterbankUserNotFoundException("routingNumber " + routingNumber + " nije nas");
+        }
+        return ResponseEntity.ok(negotiationService.serveUserInfo(id));
     }
 }

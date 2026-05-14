@@ -70,6 +70,95 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    public List<TransactionResponseDto> recordCrossCurrencyPaymentSettlement(
+            Payment payment,
+            Account toAccount,
+            Account bankFromAccount,
+            Account bankToAccount,
+            Client initiatedBy,
+            BigDecimal totalFromClient,
+            BigDecimal creditedAmount
+    ) {
+        Account fromAccount = payment.getFromAccount();
+
+        // Faza 1: Klijent {fromCurrency} → Bank {fromCurrency} (amount + provizija)
+        Transaction step1Debit = Transaction.builder()
+                .account(fromAccount)
+                .currency(fromAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description((payment.getPurpose() != null ? payment.getPurpose() : "") + " [faza 1: klijent → banka]")
+                .debit(totalFromClient)
+                .credit(BigDecimal.ZERO)
+                .balanceAfter(orZero(fromAccount.getBalance()))
+                .availableAfter(orZero(fromAccount.getAvailableBalance()))
+                .build();
+        Transaction step1Credit = Transaction.builder()
+                .account(bankFromAccount)
+                .currency(bankFromAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description("FX inflow " + fromAccount.getCurrency().getCode() + " [faza 1: klijent → banka]")
+                .debit(BigDecimal.ZERO)
+                .credit(totalFromClient)
+                .balanceAfter(orZero(bankFromAccount.getBalance()))
+                .availableAfter(orZero(bankFromAccount.getAvailableBalance()))
+                .build();
+
+        // Faza 2: Bank {fromCurrency} → Bank {toCurrency} (interna konverzija)
+        Transaction step2Debit = Transaction.builder()
+                .account(bankFromAccount)
+                .currency(bankFromAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description("FX swap " + fromAccount.getCurrency().getCode() + "→" + toAccount.getCurrency().getCode() + " [faza 2: interna konverzija]")
+                .debit(payment.getAmount())
+                .credit(BigDecimal.ZERO)
+                .balanceAfter(orZero(bankFromAccount.getBalance()))
+                .availableAfter(orZero(bankFromAccount.getAvailableBalance()))
+                .build();
+        Transaction step2Credit = Transaction.builder()
+                .account(bankToAccount)
+                .currency(bankToAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description("FX swap " + fromAccount.getCurrency().getCode() + "→" + toAccount.getCurrency().getCode() + " [faza 2: interna konverzija]")
+                .debit(BigDecimal.ZERO)
+                .credit(creditedAmount)
+                .balanceAfter(orZero(bankToAccount.getBalance()))
+                .availableAfter(orZero(bankToAccount.getAvailableBalance()))
+                .build();
+
+        // Faza 3: Bank {toCurrency} → Primalac {toCurrency}
+        Transaction step3Debit = Transaction.builder()
+                .account(bankToAccount)
+                .currency(bankToAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description("FX outflow " + toAccount.getCurrency().getCode() + " [faza 3: banka → primalac]")
+                .debit(creditedAmount)
+                .credit(BigDecimal.ZERO)
+                .balanceAfter(orZero(bankToAccount.getBalance()))
+                .availableAfter(orZero(bankToAccount.getAvailableBalance()))
+                .build();
+        Transaction step3Credit = Transaction.builder()
+                .account(toAccount)
+                .currency(toAccount.getCurrency())
+                .client(initiatedBy)
+                .payment(payment)
+                .description((payment.getPurpose() != null ? payment.getPurpose() : "") + " [faza 3: banka → primalac]")
+                .debit(BigDecimal.ZERO)
+                .credit(creditedAmount)
+                .balanceAfter(orZero(toAccount.getBalance()))
+                .availableAfter(orZero(toAccount.getAvailableBalance()))
+                .build();
+
+        return transactionRepository.saveAll(
+                List.of(step1Debit, step1Credit, step2Debit, step2Credit, step3Debit, step3Credit)
+        ).stream().map(this::toResponse).toList();
+    }
+
+    @Override
     public Page<TransactionListItemDto> getTransactions(Pageable pageable) {
         Client currentUser = getAuthenticatedUser();
         return transactionRepository.findByAccountClientId(currentUser.getId(), pageable)

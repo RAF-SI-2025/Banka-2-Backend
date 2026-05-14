@@ -15,10 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
           cache: maven
           cache-dependency-path: banka2_bek/pom.xml
@@ -27,7 +27,7 @@ jobs:
         run: mvn compile -q
 
   test:
-    name: Unit Tests
+    name: Unit Tests + Coverage Gate
     runs-on: ubuntu-latest
     needs: build
     defaults:
@@ -36,16 +36,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
           cache: maven
           cache-dependency-path: banka2_bek/pom.xml
 
-      - name: Run tests
-        run: mvn test
+      # `mvn verify` (umesto cisto `mvn test`) pokrece i `verify` fazu u kojoj
+      # JaCoCo `check` execution proverava 80% line coverage threshold.
+      # `haltOnFailure=true` u pom.xml znaci da build PUCA ako padne ispod —
+      # CI tako enforce-uje KT3 zahtev za 80% coverage.
+      - name: Run tests + JaCoCo coverage gate
+        run: mvn -B verify
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -57,23 +61,110 @@ jobs:
   lint:
     name: Checkstyle Lint
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: banka2_bek
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
           cache: maven
           cache-dependency-path: banka2_bek/pom.xml
 
+      # Pre 03.05.2026 ovo je bilo `mvn checkstyle:check || true` sa
+      # `continue-on-error: true` — efektivno no-op. Sada CI puca ako
+      # ima checkstyle violation-a (lokalni `./mvnw checkstyle:check` vec
+      # treba da prodje sa 0 violations).
       - name: Run Checkstyle
-        run: mvn checkstyle:check || true
+        run: mvn -B checkstyle:check
+
+  spotbugs:
+    name: "SpotBugs + FindSecBugs (SAST: code-pattern scan)"
+    runs-on: ubuntu-latest
+    needs: build
+    defaults:
+      run:
+        working-directory: banka2_bek
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: maven
+          cache-dependency-path: banka2_bek/pom.xml
+
+      # SpotBugs sa FindSecBugs plugin-om detektuje ~140 security bug obrazaca:
+      # SQL injection (SQL_INJECTION_*), XSS (XSS_*), weak crypto (WEAK_*),
+      # hardcoded secrets (HARD_CODE_*), SSRF (URL_REWRITTEN), itd.
+      # `failOnError=false` u pom.xml — surface findings in artifact, ne pucamo build za sad.
+      # Trazi `target/spotbugsXml.xml` u artifact-ima posle CI run-a.
+      - name: Run SpotBugs + FindSecBugs
+        run: mvn -B compile spotbugs:check
+        continue-on-error: true
+
+      - name: Upload SpotBugs report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spotbugs-report
+          path: banka2_bek/target/spotbugsXml.xml
+          if-no-files-found: ignore
+
+  dep-check:
+    name: "OWASP Dependency Check (SAST: CVE scan)"
+    runs-on: ubuntu-latest
+    needs: build
+    # Dnevni cron — NVD CVE feed je veliki (~500 MB), pokrecemo samo na main push
+    # i nedeljni schedule. PR-ovi koriste npm audit + maven dep:tree analizu.
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    defaults:
+      run:
+        working-directory: banka2_bek
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: maven
+          cache-dependency-path: banka2_bek/pom.xml
+
+      - name: Cache OWASP NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-${{ runner.os }}-v12
+
+      # `failBuildOnCVSS=7` u pom.xml: pucamo na high (CVSS >= 7.0) i critical
+      # CVE-jeve. medium (4.0-6.9) i low (0.1-3.9) idu samo u report.
+      # NVD API key (opciono — ali bez njega NVD download je rate-limited
+      # 10 req/30s, sto produzava prvi build na ~15 min):
+      # 1. Trazi besplatan API key na https://nvd.nist.gov/developers/request-an-api-key
+      # 2. U GitHub repo: Settings → Secrets → Actions → "New repository secret"
+      # 3. Name: NVD_API_KEY, Value: <tvoj-uuid-iz-emaila>
+      # Sa key-om, NVD download ide ~3 min umesto 15 min.
+      - name: Run OWASP Dependency Check
+        run: mvn -B dependency-check:check -DskipDepCheck=false
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        continue-on-error: true
+
+      - name: Upload Dependency Check report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: banka2_bek/target/dependency-check-report.html
+          if-no-files-found: ignore
 
   docker-build:
     name: Build Docker Image
