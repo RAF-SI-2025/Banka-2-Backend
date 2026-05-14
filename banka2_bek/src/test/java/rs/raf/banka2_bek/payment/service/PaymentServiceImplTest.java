@@ -26,6 +26,10 @@ import rs.raf.banka2_bek.payment.model.Payment;
 import rs.raf.banka2_bek.payment.repository.PaymentAccountRepository;
 import rs.raf.banka2_bek.payment.repository.PaymentRepository;
 import rs.raf.banka2_bek.payment.service.implementation.PaymentServiceImpl;
+import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
+import rs.raf.banka2_bek.interbank.service.BankRoutingService;
+import rs.raf.banka2_bek.interbank.service.InterbankPaymentAsyncService;
+import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import rs.raf.banka2_bek.notification.service.MailNotificationService;
 import rs.raf.banka2_bek.transaction.dto.TransactionResponseDto;
 import rs.raf.banka2_bek.transaction.dto.TransactionType;
@@ -64,6 +68,14 @@ class PaymentServiceImplTest {
     private ExchangeService exchangeService;
     @Mock
     private MailNotificationService mailNotificationService;
+    @Mock
+    private BankRoutingService bankRoutingService;
+    @Mock
+    private TransactionExecutorService transactionExecutorService;
+    @Mock
+    private InterbankPaymentAsyncService interbankPaymentAsyncService;
+    @Mock
+    private InterbankTransactionRepository interbankTransactionRepository;
 
     private PaymentServiceImpl paymentService;
 
@@ -78,7 +90,10 @@ class PaymentServiceImplTest {
         paymentService = new PaymentServiceImpl(
                 paymentRepository, paymentAccountRepository, accountRepository,
                 clientRepository, transactionService, paymentReceiptPdfGenerator,
-                exchangeService, mailNotificationService, "22200022");
+                exchangeService, mailNotificationService,
+                bankRoutingService, transactionExecutorService,
+                interbankPaymentAsyncService, interbankTransactionRepository,
+                "22200022");
 
         request = new CreatePaymentRequestDto();
         request.setFromAccount("111111111111111111");

@@ -22,6 +22,10 @@ import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
 import rs.raf.banka2_bek.currency.model.Currency;
 import rs.raf.banka2_bek.exchange.ExchangeService;
+import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
+import rs.raf.banka2_bek.interbank.service.BankRoutingService;
+import rs.raf.banka2_bek.interbank.service.InterbankPaymentAsyncService;
+import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import rs.raf.banka2_bek.notification.service.MailNotificationService;
 import rs.raf.banka2_bek.payment.dto.CreatePaymentRequestDto;
 import rs.raf.banka2_bek.payment.model.PaymentCode;
@@ -62,6 +66,10 @@ class PaymentServiceBranchCoverageTest {
     @Mock private PaymentReceiptPdfGenerator paymentReceiptPdfGenerator;
     @Mock private ExchangeService exchangeService;
     @Mock private MailNotificationService mailNotificationService;
+    @Mock private BankRoutingService bankRoutingService;
+    @Mock private TransactionExecutorService transactionExecutorService;
+    @Mock private InterbankPaymentAsyncService interbankPaymentAsyncService;
+    @Mock private InterbankTransactionRepository interbankTransactionRepository;
 
     private PaymentServiceImpl paymentService;
 
@@ -70,7 +78,10 @@ class PaymentServiceBranchCoverageTest {
         paymentService = new PaymentServiceImpl(
                 paymentRepository, paymentAccountRepository, accountRepository,
                 clientRepository, transactionService, paymentReceiptPdfGenerator,
-                exchangeService, mailNotificationService, "22200022");
+                exchangeService, mailNotificationService,
+                bankRoutingService, transactionExecutorService,
+                interbankPaymentAsyncService, interbankTransactionRepository,
+                "22200022");
     }
 
     @AfterEach

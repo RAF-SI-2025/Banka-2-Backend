@@ -31,6 +31,10 @@ import rs.raf.banka2_bek.payment.model.PaymentStatus;
 import rs.raf.banka2_bek.payment.repository.PaymentAccountRepository;
 import rs.raf.banka2_bek.payment.repository.PaymentRepository;
 import rs.raf.banka2_bek.payment.service.implementation.PaymentServiceImpl;
+import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
+import rs.raf.banka2_bek.interbank.service.BankRoutingService;
+import rs.raf.banka2_bek.interbank.service.InterbankPaymentAsyncService;
+import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import rs.raf.banka2_bek.notification.service.MailNotificationService;
 import rs.raf.banka2_bek.transaction.service.TransactionService;
 
@@ -63,6 +67,10 @@ class PaymentServiceImplExtendedTest {
     @Mock private PaymentReceiptPdfGenerator paymentReceiptPdfGenerator;
     @Mock private ExchangeService exchangeService;
     @Mock private MailNotificationService mailNotificationService;
+    @Mock private BankRoutingService bankRoutingService;
+    @Mock private TransactionExecutorService transactionExecutorService;
+    @Mock private InterbankPaymentAsyncService interbankPaymentAsyncService;
+    @Mock private InterbankTransactionRepository interbankTransactionRepository;
 
     private PaymentServiceImpl paymentService;
 
@@ -77,7 +85,10 @@ class PaymentServiceImplExtendedTest {
         paymentService = new PaymentServiceImpl(
                 paymentRepository, paymentAccountRepository, accountRepository,
                 clientRepository, transactionService, paymentReceiptPdfGenerator,
-                exchangeService, mailNotificationService, "22200022");
+                exchangeService, mailNotificationService,
+                bankRoutingService, transactionExecutorService,
+                interbankPaymentAsyncService, interbankTransactionRepository,
+                "22200022");
 
         client = new Client();
         client.setId(10L);
