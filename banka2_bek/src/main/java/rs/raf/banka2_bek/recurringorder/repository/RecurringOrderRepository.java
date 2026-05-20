@@ -9,11 +9,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // JPA repozitorijum za trajne naloge.
 //
-// IMPLEMENTIRATI — dodati sledece metode:
+// IMPLEMENTIRANO — dodate sledece metode:
 //   - List<RecurringOrder> findByActiveTrue()
 //       -> koristi ga scheduler da dobije sve aktivne naloge za tek izvrsavanje;
 //          nije potrebna dodatna JPQL anotacija, Spring Data derivira upit automatski
@@ -26,7 +26,7 @@ import java.util.List;
 //         @Query("SELECT r FROM RecurringOrder r WHERE r.active = true AND r.nextRun <= :now")
 //         List<RecurringOrder> findDue(@Param("now") LocalDateTime now);
 //
-// Konvencija: pratiti paket `savings` kao sablon.
+// Konvencija: prati paket `savings` kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B8.
 // ============================================================
 public interface RecurringOrderRepository extends JpaRepository<RecurringOrder, Long> {

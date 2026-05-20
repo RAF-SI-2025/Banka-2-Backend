@@ -13,14 +13,14 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // Scheduler koji periodicno provera i izvrsava dospele trajne naloge.
 // Prati obrazac iz SavingsScheduler — transakcione operacije delegira na
 // RecurringOrderService da bi @Transactional(REQUIRES_NEW) Spring AOP proxy
 // ispravno presreo pozive (direktni `this.method()` pozivi bi bili ignorisani).
 //
-// IMPLEMENTIRATI — dodati @Scheduled metodu i helper:
+// IMPLEMENTIRANO — dodata @Scheduled metoda i helper:
 //
 //   @Scheduled(fixedRate = 60_000)     // svakih 60 sekundi
 //   public void processRecurringOrders()
@@ -50,7 +50,7 @@ import java.util.List;
 // na glavnoj @SpringBootApplication klasi. Proveriti da li je vec omoguceno u
 // projektu pre aktiviranja — ne dodavati duplikat.
 //
-// Konvencija: pratiti paket `savings` (SavingsScheduler) kao sablon.
+// Konvencija: prati paket `savings` (SavingsScheduler) kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B8.
 // ============================================================
 @Component

@@ -1,7 +1,7 @@
 package rs.raf.banka2_bek.recurringorder.model;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // Enum kadence (ucestalosti) izvrsavanja trajnog naloga.
 //

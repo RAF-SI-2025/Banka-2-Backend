@@ -30,11 +30,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // Poslovni servis za upravljanje trajnim nalozima i njihovo izvrsavanje.
 //
-// IMPLEMENTIRATI — injectovati sledece bean-ove kao final polja:
+// IMPLEMENTIRANO — injectovani sledeci bean-ovi kao final polja:
 //   - RecurringOrderRepository recurringOrderRepo
 //   - rs.raf.banka2_bek.auth.util.UserResolver userResolver
 //   - rs.raf.banka2_bek.order.service.OrderServiceImpl orderService
@@ -43,7 +43,7 @@ import java.util.List;
 //   - rs.raf.banka2_bek.listing.repository.ListingRepository listingRepo
 //       (za dohvatanje ticker-a pri mapiranju u RecurringOrderDto)
 //
-// IMPLEMENTIRATI — metode (sve u @Transactional osim listMy):
+// IMPLEMENTIRANO — metode (sve u @Transactional osim listMy):
 //
 //   RecurringOrderDto create(CreateRecurringOrderDto dto)
 //       1. UserResolver.resolveCurrent() -> userId + ownerType ("CLIENT"/"EMPLOYEE")
@@ -109,7 +109,7 @@ import java.util.List;
 //   private RecurringOrderDto toDto(RecurringOrder r)
 //       -> Mapiranje entiteta u DTO (popuniti listingTicker iz ListingRepository)
 //
-// Konvencija: pratiti paket `savings` kao sablon.
+// Konvencija: prati paket `savings` kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B8.
 // ============================================================
 @Service

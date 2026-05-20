@@ -10,12 +10,12 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // JPA entitet koji predstavlja jedan trajni nalog (DCA nalog).
 // Tabla u bazi: `recurring_orders`.
 //
-// IMPLEMENTIRATI — dodati sva polja (nakon `id`):
+// IMPLEMENTIRANO — dodata sva polja (nakon `id`):
 //   - ownerId      Long,   @Column(nullable=false)
 //                          vlasnik naloga (klijent ili aktuar)
 //   - ownerType    String, @Column(nullable=false, length=16)

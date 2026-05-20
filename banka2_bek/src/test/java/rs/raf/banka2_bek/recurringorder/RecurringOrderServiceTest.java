@@ -35,12 +35,12 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // Unit testovi za RecurringOrderService sa Mockito strict stubbing.
 // Sablon iz projekta: SavingsDepositServiceTest, SavingsSchedulerTest.
 //
-// IMPLEMENTIRATI — dodati @Mock polja i @InjectMocks:
+// IMPLEMENTIRANO — dodato @Mock polja i @InjectMocks:
 //   @Mock RecurringOrderRepository recurringOrderRepo
 //   @Mock rs.raf.banka2_bek.auth.util.UserResolver userResolver
 //   @Mock rs.raf.banka2_bek.order.service.OrderServiceImpl orderService
@@ -48,8 +48,8 @@ import static org.mockito.Mockito.*;
 //   @Mock rs.raf.banka2_bek.listing.repository.ListingRepository listingRepo
 //   @InjectMocks RecurringOrderService recurringOrderService
 //
-// IMPLEMENTIRATI — dodati sledece @Test metode (jedan @Test po scenariju,
-// koristiti AssertJ assertThat / assertThatThrownBy kao u ostalim testovima):
+// IMPLEMENTIRANO — dodate sledece @Test metode (jedan @Test po scenariju,
+// koristi AssertJ assertThat / assertThatThrownBy kao u ostalim testovima):
 //
 //   create_clientCanCreateRecurringOrder()
 //       -> Mock userResolver da vrati CLIENT kontekst
@@ -121,7 +121,7 @@ import static org.mockito.Mockito.*;
 //       -> Verifikovati da se aktuarov usedLimit/dnevni limit azurira posle kreiranja ordera
 //          (mock ActuaryService ili direktno actuary.usedLimit)
 //
-// Konvencija: pratiti SavingsDepositServiceTest / SavingsSchedulerTest kao sablon.
+// Konvencija: prati SavingsDepositServiceTest / SavingsSchedulerTest kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B8.
 // ============================================================
 @ExtendWith(MockitoExtension.class)
