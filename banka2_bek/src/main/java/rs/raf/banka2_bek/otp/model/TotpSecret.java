@@ -39,4 +39,14 @@ public class TotpSecret {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false, unique = true)
+    private Long userId;
+
+    @Column(nullable = false, length = 64)
+    private String secret;
+
+    @CreationTimestamp
+    @Column(nullable = false, updatable = false)
+    private LocalDateTime createdAt;
 }

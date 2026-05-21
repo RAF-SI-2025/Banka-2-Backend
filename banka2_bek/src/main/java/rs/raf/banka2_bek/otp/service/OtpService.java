@@ -1,14 +1,15 @@
 package rs.raf.banka2_bek.otp.service;
 
+import com.warrenstrange.googleauth.GoogleAuthenticator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import rs.raf.banka2_bek.auth.model.User;
+import rs.raf.banka2_bek.auth.repository.UserRepository;
 import rs.raf.banka2_bek.notification.service.MailSenderService;
-import rs.raf.banka2_bek.otp.model.OtpVerification;
-import rs.raf.banka2_bek.otp.repository.OtpVerificationRepository;
+import rs.raf.banka2_bek.otp.repository.TotpSecretRepository;
 
-import java.security.SecureRandom;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 /*
@@ -38,137 +39,95 @@ import java.util.Map;
 @Service
 public class OtpService {
 
-    private final OtpVerificationRepository otpRepository;
-    private final MailSenderService mailSenderService;
-    private final int expiryMinutes;
-    private final int maxAttempts;
-    private final SecureRandom secureRandom = new SecureRandom();
+    private static final long TOTP_WINDOW_SECONDS = 30L;
 
-    public OtpService(OtpVerificationRepository otpRepository,
+    private final UserRepository userRepository;
+    private final TotpService totpService;
+    private final TotpSecretRepository totpSecretRepository;
+    private final MailSenderService mailSenderService;
+    private final int emailExpiryMinutes;
+
+    public OtpService(UserRepository userRepository,
+                      TotpService totpService,
+                      TotpSecretRepository totpSecretRepository,
                       MailSenderService mailSenderService,
-                      @Value("${otp.expiry-minutes:5}") int expiryMinutes,
-                      @Value("${otp.max-attempts:3}") int maxAttempts) {
-        this.otpRepository = otpRepository;
+                      @Value("${otp.expiry-minutes:5}") int emailExpiryMinutes) {
+        this.userRepository = userRepository;
+        this.totpService = totpService;
+        this.totpSecretRepository = totpSecretRepository;
         this.mailSenderService = mailSenderService;
-        this.expiryMinutes = expiryMinutes;
-        this.maxAttempts = maxAttempts;
+        this.emailExpiryMinutes = emailExpiryMinutes;
     }
 
     @Transactional
     public void generateAndSend(String email) {
-        // Invalidate any existing unused OTP
-        otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc(email)
-                .ifPresent(existing -> {
-                    existing.setUsed(true);
-                    otpRepository.save(existing);
-                });
-
-        String code = String.format("%06d", secureRandom.nextInt(1_000_000));
-
-        OtpVerification otp = OtpVerification.builder()
-                .email(email)
-                .code(code)
-                .expiresAt(LocalDateTime.now().plusMinutes(expiryMinutes))
-                .build();
-
-        otpRepository.save(otp);
-
-        // OTP se prikazuje na mobilnoj aplikaciji - email se ne salje
+        ensureSecret(email);
     }
 
     @Transactional
     public void generateAndSendViaEmail(String email) {
-        otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc(email)
-                .ifPresent(existing -> {
-                    existing.setUsed(true);
-                    otpRepository.save(existing);
-                });
-
-        String code = String.format("%06d", secureRandom.nextInt(1_000_000));
-
-        OtpVerification otp = OtpVerification.builder()
-                .email(email)
-                .code(code)
-                .expiresAt(LocalDateTime.now().plusMinutes(expiryMinutes))
-                .build();
-
-        otpRepository.save(otp);
-        mailSenderService.sendOtpMail(email, code, expiryMinutes);
+        String secret = ensureSecret(email);
+        String code = currentCode(secret);
+        mailSenderService.sendOtpMail(email, code, emailExpiryMinutes);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public Map<String, Object> getActiveOtp(String email) {
-        OtpVerification otp = otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc(email)
-                .orElse(null);
-
-        if (otp == null || otp.isExpired()) {
-            return Map.of("active", false, "message", "Nema aktivnog verifikacionog koda.");
-        }
-
-        long secondsLeft = java.time.Duration.between(LocalDateTime.now(), otp.getExpiresAt()).getSeconds();
+        String secret = ensureSecret(email);
+        String code = currentCode(secret);
+        long secondsLeft = TOTP_WINDOW_SECONDS - (Instant.now().getEpochSecond() % TOTP_WINDOW_SECONDS);
 
         return Map.of(
                 "active", true,
-                "code", otp.getCode(),
-                "expiresInSeconds", Math.max(secondsLeft, 0),
-                "attempts", otp.getAttempts(),
-                "maxAttempts", maxAttempts);
+                "code", code,
+                "expiresInSeconds", secondsLeft,
+                "attempts", 0,
+                "maxAttempts", 0);
     }
 
     @Transactional
     public Map<String, Object> verify(String email, String code) {
-        OtpVerification otp = otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc(email)
-                .orElse(null);
-
-        if (otp == null) {
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
             return Map.of(
                     "verified", false,
                     "blocked", false,
                     "message", "Verifikacioni kod nije pronadjen. Zatrazite novi kod.");
         }
 
-        if (otp.isExpired()) {
-            otp.setUsed(true);
-            otpRepository.save(otp);
+        boolean ok;
+        try {
+            ok = totpService.verify(user.getId(), code);
+        } catch (IllegalStateException ex) {
             return Map.of(
                     "verified", false,
                     "blocked", false,
-                    "message", "Verifikacioni kod je istekao. Zatrazite novi kod.");
+                    "message", "Verifikacioni kod nije pronadjen. Zatrazite novi kod.");
         }
 
-        if (otp.getAttempts() >= maxAttempts) {
-            otp.setUsed(true);
-            otpRepository.save(otp);
-            return Map.of(
-                    "verified", false,
-                    "blocked", true,
-                    "message", "Transakcija otkazana - previse neuspesnih pokusaja");
-        }
-
-        if (otp.getCode().equals(code)) {
-            otp.setUsed(true);
-            otpRepository.save(otp);
+        if (ok) {
             return Map.of(
                     "verified", true,
                     "message", "Transakcija uspesno verifikovana");
         }
 
-        otp.setAttempts(otp.getAttempts() + 1);
-        otpRepository.save(otp);
-
-        int remaining = maxAttempts - otp.getAttempts();
-        if (remaining <= 0) {
-            otp.setUsed(true);
-            otpRepository.save(otp);
-            return Map.of(
-                    "verified", false,
-                    "blocked", true,
-                    "message", "Transakcija otkazana - previse neuspesnih pokusaja");
-        }
-
         return Map.of(
                 "verified", false,
                 "blocked", false,
-                "message", "Pogresan verifikacioni kod. Preostalo pokusaja: " + remaining);
+                "message", "Pogresan verifikacioni kod.");
+    }
+
+    private String ensureSecret(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("Korisnik nije pronadjen: " + email));
+
+        return totpSecretRepository.findByUserId(user.getId())
+                .map(rs.raf.banka2_bek.otp.model.TotpSecret::getSecret)
+                .orElseGet(() -> totpService.generateSecret(user.getId()));
+    }
+
+    private String currentCode(String secret) {
+        int raw = new GoogleAuthenticator().getTotpPassword(secret);
+        return String.format("%06d", raw);
     }
 }

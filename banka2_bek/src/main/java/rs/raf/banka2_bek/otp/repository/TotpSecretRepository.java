@@ -3,6 +3,8 @@ package rs.raf.banka2_bek.otp.repository;
 import org.springframework.data.jpa.repository.JpaRepository;
 import rs.raf.banka2_bek.otp.model.TotpSecret;
 
+import java.util.Optional;
+
 // ============================================================
 // TODO [B3 - TOTP verifikacioni kod | Nosilac: Nikola Stamenkovic]
 //
@@ -22,4 +24,8 @@ import rs.raf.banka2_bek.otp.model.TotpSecret;
 // Spec: Zadaci_Backend.pdf, zadatak B3.
 // ============================================================
 public interface TotpSecretRepository extends JpaRepository<TotpSecret, Long> {
+
+    Optional<TotpSecret> findByUserId(Long userId);
+
+    void deleteByUserId(Long userId);
 }
