@@ -23,6 +23,7 @@ import rs.raf.banka2_bek.transfers.dto.TransferFxRequestDto;
 import rs.raf.banka2_bek.transfers.dto.TransferResponseDto;
 import rs.raf.banka2_bek.transfers.model.Transfer;
 import rs.raf.banka2_bek.transfers.repository.TransferRepository;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -49,6 +50,7 @@ class TransferServiceCoverageTest {
     @Mock private AccountRepository accountRepository;
     @Mock private ExchangeService exchangeService;
     @Mock private ClientRepository clientRepository;
+    @Mock private NotificationService notificationService;
 
     private TransferService transferService;
 
@@ -60,7 +62,7 @@ class TransferServiceCoverageTest {
         // iz integration testa) i Mockito strict stub puca jer code-under-test
         // poziva findByEmail sa neocekivanim argumentom.
         SecurityContextHolder.clearContext();
-        transferService = new TransferService(transferRepository, accountRepository, exchangeService, clientRepository);
+        transferService = new TransferService(transferRepository, accountRepository, exchangeService, clientRepository, notificationService);
         Field f = TransferService.class.getDeclaredField("bankRegistrationNumber");
         f.setAccessible(true);
         f.set(transferService, "22200022");

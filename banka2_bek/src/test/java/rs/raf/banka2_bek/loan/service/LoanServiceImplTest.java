@@ -26,6 +26,7 @@ import rs.raf.banka2_bek.loan.repository.LoanRepository;
 import rs.raf.banka2_bek.loan.repository.LoanRequestRepository;
 import rs.raf.banka2_bek.loan.service.implementation.LoanServiceImpl;
 import rs.raf.banka2_bek.notification.service.MailSenderService;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -47,6 +48,7 @@ class LoanServiceImplTest {
     @Mock private ClientRepository clientRepository;
     @Mock private CurrencyRepository currencyRepository;
     @Mock private MailSenderService mailSenderService;
+    @Mock private NotificationService notificationService;
 
     private LoanServiceImpl loanService;
 
@@ -60,7 +62,7 @@ class LoanServiceImplTest {
         loanService = new LoanServiceImpl(
                 loanRequestRepository, loanRepository, installmentRepository,
                 accountRepository, clientRepository, currencyRepository,
-                mailSenderService, "22200022");
+                mailSenderService, "22200022", notificationService);
 
         rsd = new Currency();
         rsd.setId(8L);

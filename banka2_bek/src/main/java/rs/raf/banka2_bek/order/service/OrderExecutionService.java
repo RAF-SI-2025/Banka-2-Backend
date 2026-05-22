@@ -19,6 +19,8 @@ import rs.raf.banka2_bek.order.model.OrderType;
 import rs.raf.banka2_bek.order.repository.OrderRepository;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
+import rs.raf.banka2_bek.notification.model.NotificationType;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
@@ -71,6 +73,7 @@ public class OrderExecutionService {
     private final FundReservationService fundReservationService;
     private final FundLiquidationService fundLiquidationService;
     private final ApplicationEventPublisher eventPublisher;
+    private final NotificationService notificationService;
 
     @Value("${bank.registration-number}")
     private String bankRegistrationNumber;
@@ -135,6 +138,19 @@ public class OrderExecutionService {
 
                     log.warn("Order #{} auto-declined: settlement date {} has passed",
                             order.getId(), order.getListing().getSettlementDate());
+                    try {
+                        notificationService.notify(
+                                order.getUserId(),
+                                order.getUserRole(),
+                                NotificationType.ORDER_CANCELLED,
+                                "Nalog otkazan",
+                                "Vaš nalog za " + order.getListing().getTicker() + " je automatski otkazan jer je datum dospeća prošao.",
+                                "ORDER",
+                                order.getId()
+                        );
+                    } catch (Exception ex) {
+                        log.warn("Failed to send order cancelled notification for order #{}: {}", order.getId(), ex.getMessage());
+                    }
                     continue;
                 }
 
@@ -335,6 +351,33 @@ public class OrderExecutionService {
 
         if (justCompleted) {
             publishOrderCompleted(order);
+            try {
+                notificationService.notify(
+                        order.getUserId(),
+                        order.getUserRole(),
+                        NotificationType.ORDER_EXECUTED,
+                        "Nalog izvršen",
+                        "Vaš nalog za " + order.getListing().getTicker() + " je u potpunosti izvršen.",
+                        "ORDER",
+                        order.getId()
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to send order executed notification for order #{}: {}", order.getId(), ex.getMessage());
+            }
+        } else {
+            try {
+                notificationService.notify(
+                        order.getUserId(),
+                        order.getUserRole(),
+                        NotificationType.ORDER_PARTIAL_FILL,
+                        "Nalog delimično izvršen",
+                        "Vaš nalog za " + order.getListing().getTicker() + " je delimično izvršen. Preostalo: " + order.getRemainingPortions() + " komada.",
+                        "ORDER",
+                        order.getId()
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to send order partial fill notification for order #{}: {}", order.getId(), ex.getMessage());
+            }
         }
     }
 

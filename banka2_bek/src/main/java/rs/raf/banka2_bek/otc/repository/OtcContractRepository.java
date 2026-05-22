@@ -43,4 +43,8 @@ public interface OtcContractRepository extends JpaRepository<OtcContract, Long> 
     @Query("SELECT c FROM OtcContract c WHERE c.status = rs.raf.banka2_bek.otc.model.OtcContractStatus.ACTIVE " +
            "AND c.settlementDate < :today")
     List<OtcContract> findExpiredActive(@Param("today") LocalDate today);
+
+    @Query("SELECT c FROM OtcContract c WHERE c.status = rs.raf.banka2_bek.otc.model.OtcContractStatus.ACTIVE " +
+           "AND c.settlementDate = :targetDate")
+    List<OtcContract> findActiveExpiringOn(@Param("targetDate") LocalDate targetDate);
 }

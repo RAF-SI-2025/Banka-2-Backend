@@ -4,6 +4,8 @@ import org.springframework.data.domain.Page;
 import rs.raf.banka2_bek.order.dto.CreateOrderDto;
 import rs.raf.banka2_bek.order.dto.OrderDto;
 
+import java.time.LocalDate;
+
 public interface OrderService {
 
     /**
@@ -54,9 +56,16 @@ public interface OrderService {
     Page<OrderDto> getAllOrders(String status, int page, int size);
 
     /**
-     * Pregled ordera jednog korisnika (za korisnika).
+     * Pregled ordera jednog korisnika (za korisnika) sa opcionim filterima.
+     *
+     * @param page       nula-bazirani broj stranice
+     * @param size       velicina stranice
+     * @param status     opcionalni filter po statusu (PENDING, APPROVED, DECLINED, DONE)
+     * @param dateFrom   opcionalni filter — orderi kreirani posle ovog datuma (ukljucivo)
+     * @param dateTo     opcionalni filter — orderi kreirani pre ovog datuma (ukljucivo)
+     * @param listingType opcionalni filter po tipu hartije (STOCK, FUTURES, FOREX)
      */
-    Page<OrderDto> getMyOrders(int page, int size);
+    Page<OrderDto> getMyOrders(int page, int size, String status, LocalDate dateFrom, LocalDate dateTo, String listingType);
 
     /**
      * Detalji jednog ordera.
