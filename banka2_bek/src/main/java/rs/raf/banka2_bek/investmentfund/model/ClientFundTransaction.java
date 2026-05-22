@@ -39,7 +39,7 @@ public class ClientFundTransaction {
     private boolean inflow;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
+    @Column(nullable = false, length = 32)
     private ClientFundTransactionStatus status;
 
     @Column(name = "created_at", nullable = false)

@@ -2,9 +2,6 @@ package rs.raf.banka2_bek.dividend.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +17,8 @@ import rs.raf.banka2_bek.auth.util.UserResolver;
 import rs.raf.banka2_bek.dividend.dto.DividendPayoutDto;
 import rs.raf.banka2_bek.dividend.model.DividendPayout;
 import rs.raf.banka2_bek.dividend.repository.DividendPayoutRepository;
+import rs.raf.banka2_bek.investmentfund.model.ClientFundTransaction;
+import rs.raf.banka2_bek.investmentfund.service.FundDividendService;
 import rs.raf.banka2_bek.order.service.CurrencyConversionService;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
@@ -29,7 +28,6 @@ import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -110,6 +108,7 @@ public class DividendService {
     private final ListingRepository listingRepository;
     private final UserResolver userResolver;
     private final CurrencyConversionService currencyConversionService;
+    private final FundDividendService fundDividendService;
 
     @Value("${bank.registration-number:22200022}")
     private String bankRegistrationNumber;
@@ -181,8 +180,44 @@ public class DividendService {
         BigDecimal tax = isTaxExempt ? BigDecimal.ZERO : grossAmount.multiply(new BigDecimal("0.15")).setScale(4, RoundingMode.HALF_UP);
         BigDecimal netAmount = grossAmount.subtract(tax).setScale(4, RoundingMode.HALF_UP);
 
-        // Određivanje valute i računa
+        // Određivanje valute. Za fondove se B11 grana posebno obrađuje: sredstva se knjiže na račun fonda
+        // i dalje se obrađuju kroz FundDividendService (reinvestiranje ili raspodela klijentima).
         String currencyCode = listing.getBaseCurrency() != null ? listing.getBaseCurrency() : "USD"; // Fallback na USD ako nema valute
+
+        if ("FUND".equalsIgnoreCase(portfolio.getUserRole())) {
+            BigDecimal amountForFund = grossAmount;
+            if (!"RSD".equalsIgnoreCase(currencyCode)) {
+                amountForFund = currencyConversionService.convert(grossAmount, currencyCode, "RSD");
+            }
+
+            ClientFundTransaction fundTx = fundDividendService.creditDividendToFund(
+                    portfolio.getUserId(),
+                    portfolio.getListingId(),
+                    amountForFund);
+
+            DividendPayout payout = DividendPayout.builder()
+                    .ownerId(portfolio.getUserId())
+                    .ownerType(portfolio.getUserRole().toUpperCase())
+                    .stockListingId(portfolio.getListingId())
+                    .stockTicker(portfolio.getListingTicker())
+                    .quantity(portfolio.getQuantity())
+                    .priceOnDate(price)
+                    .dividendYieldRate(quarterlyYieldRate)
+                    .grossAmount(amountForFund)
+                    .tax(BigDecimal.ZERO)
+                    .netAmount(amountForFund)
+                    .creditedAccountId(fundTx.getSourceAccountId())
+                    .currencyCode("RSD")
+                    .paymentDate(paymentDate)
+                    .taxExempt(true)
+                    .build();
+
+            dividendPayoutRepository.save(payout);
+            log.info("B11: dividenda za ticker {} uplaćena fondu #{}, iznos={} RSD",
+                    portfolio.getListingTicker(), portfolio.getUserId(), amountForFund);
+            return;
+        }
+
         Account targetAccount = resolveTargetAccount(portfolio, currencyCode);
 
         // Ako je primenjen Fallback 2 (konverzija u RSD), moramo prebaciti neto iznos u RSD
