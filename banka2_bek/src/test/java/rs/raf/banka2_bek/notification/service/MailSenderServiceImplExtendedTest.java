@@ -28,6 +28,7 @@ class MailSenderServiceImplExtendedTest {
     @Mock private AccountCreatedConfirmationEmailTemplate accountCreatedConfirmationEmailTemplate;
     @Mock private OtpEmailTemplate otpEmailTemplate;
     @Mock private TransactionEmailTemplate transactionEmailTemplate;
+    @Mock private AccountLockedEmailTemplate accountLockedEmailTemplate;
     @Mock private MimeMessage mimeMessage;
 
     private MailSenderService service;
@@ -35,7 +36,7 @@ class MailSenderServiceImplExtendedTest {
     @BeforeEach
     void setUp() {
         when(mailSender.createMimeMessage()).thenReturn(mimeMessage);
-        service = new MailSenderService(mailSender, passwordResetEmailTemplate, activationEmailTemplate,
+        service = new MailSenderService(mailSender, passwordResetEmailTemplate, accountLockedEmailTemplate, activationEmailTemplate,
                 activationConfirmedEmailTemplate, accountCreatedConfirmationEmailTemplate, otpEmailTemplate,
                 transactionEmailTemplate, "noreply@banka.rs", "http://localhost:3000", "/reset-password",
                 "http://localhost:3000", "/activate-account");

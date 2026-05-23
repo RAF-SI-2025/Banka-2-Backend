@@ -181,6 +181,43 @@ class DtoValidationTest {
             Set<ConstraintViolation<RegisterRequestDto>> violations = validator.validate(dto);
             assertThat(violations).isNotEmpty();
         }
+
+        @Test
+        void invalidPhoneFormat_hasViolation() {
+            RegisterRequestDto dto = buildValid();
+            dto.setPhone("06-123-456");
+            Set<ConstraintViolation<RegisterRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isNotEmpty();
+            assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("phone"));
+        }
+
+        @Test
+        void validPhoneWithPlus_noViolation() {
+            RegisterRequestDto dto = buildValid();
+            dto.setPhone("+381601234567");
+            Set<ConstraintViolation<RegisterRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isEmpty();
+        }
+
+        @Test
+        void futureDateOfBirth_hasViolation() {
+            RegisterRequestDto dto = buildValid();
+            dto.setDateOfBirth(System.currentTimeMillis() + 86_400_000L);
+            Set<ConstraintViolation<RegisterRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isNotEmpty();
+            assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("dateOfBirthValid"));
+        }
+
+        @Test
+        void pastDateOfBirth_noViolation() {
+            RegisterRequestDto dto = buildValid();
+            dto.setDateOfBirth(LocalDate.of(1990, 1, 1)
+                    .atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli());
+            Set<ConstraintViolation<RegisterRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isEmpty();
+        }
     }
 
     // ── CreateEmployeeRequestDto ────────────────────────────────────
@@ -261,6 +298,32 @@ class DtoValidationTest {
         void nullPermissions_isOptional_noViolation() {
             CreateEmployeeRequestDto dto = buildValid();
             dto.setPermissions(null);
+            Set<ConstraintViolation<CreateEmployeeRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isEmpty();
+        }
+
+        @Test
+        void futureDateOfBirth_hasViolation() {
+            CreateEmployeeRequestDto dto = buildValid();
+            dto.setDateOfBirth(LocalDate.now().plusDays(1));
+            Set<ConstraintViolation<CreateEmployeeRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isNotEmpty();
+            assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("dateOfBirth"));
+        }
+
+        @Test
+        void invalidPhoneFormat_hasViolation() {
+            CreateEmployeeRequestDto dto = buildValid();
+            dto.setPhone("abc-def");
+            Set<ConstraintViolation<CreateEmployeeRequestDto>> violations = validator.validate(dto);
+            assertThat(violations).isNotEmpty();
+            assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("phone"));
+        }
+
+        @Test
+        void validPhoneWithPlus_noViolation() {
+            CreateEmployeeRequestDto dto = buildValid();
+            dto.setPhone("+381601234567");
             Set<ConstraintViolation<CreateEmployeeRequestDto>> violations = validator.validate(dto);
             assertThat(violations).isEmpty();
         }

@@ -47,37 +47,6 @@ public class AuthService {
     private final ApplicationEventPublisher eventPublisher;
     private final AccountLockoutService accountLockoutService;
 
-    /*
-     * // TODO [B2 - Validacija + brute-force | Nosilac: Andjela Vilcek]
-     *
-     * Nakon migracije AccountLockoutService na DB-bazirano stanje
-     * (videti TODO u AccountLockoutService.java), potrebne su sledece
-     * izmene u ovom servisu:
-     *
-     * 1. login() metoda:
-     *    - Redosled provera ostaje isti: najpre accountLockoutService.assertNotLocked,
-     *      zatim provera lozinke.
-     *    - Nakon sto AccountLockoutService pocne da cita accountLockedUntil
-     *      iz baze, assertNotLocked automatski postaje DB-svestan — login()
-     *      ne zahteva direktne izmene osim potencijalnog @Transactional
-     *      anotiranja ako se u istoj transakciji i cita i upisuje lockout stanje.
-     *    - Proveriti da li je @Transactional(readOnly = false) potreban na
-     *      login() da bi recordSuccess i recordFailure mogli da commituju.
-     *
-     * 2. resetPassword() metoda (linija ~272):
-     *    - Posle uspesne promene lozinke pozvati:
-     *        accountLockoutService.recordSuccess(targetEmail)
-     *      da se otkljuca nalog i nulira failedLoginAttempts u bazi.
-     *    - targetEmail je email korisnika cija je lozinka promenjena
-     *      (user.getEmail() ili employee.getEmail() — analogno sa
-     *      passwordResetToken.getUser()/getEmployee()).
-     *
-     * 3. Opciono — requestPasswordReset() metoda:
-     *    - Spec ne zahteva, ali je dobra praksa ne otkrivati da li email
-     *      postoji (trenutno baca RuntimeException ako korisnik ne postoji,
-     *      sto je security leak). Razmotriti silent no-op umesto exception-a.
-     */
-
     public AuthService(UserRepository userRepository,
                        EmployeeRepository employeeRepository,
                        ClientRepository clientRepository,
@@ -300,6 +269,7 @@ public class AuthService {
         return "Password reset token generated and email event emitted";
     }
 
+    @Transactional
     public String resetPassword(PasswordResetDto reset){
 
         PasswordResetToken passwordResetToken = passwordResetTokenRepository.findByToken(reset.getToken())
@@ -323,14 +293,22 @@ public class AuthService {
         if (user != null) {
             String hashedNewPassword = passwordEncoder.encode(reset.getNewPassword());
             user.setPassword(hashedNewPassword);
+            user.setFailedLoginAttempts(0);
+            user.setAccountLockedUntil(null);
             userRepository.save(user);
         } else {
             String salt = employee.getSaltPassword();
             employee.setPassword(passwordEncoder.encode(reset.getNewPassword() + salt));
+            employee.setFailedLoginAttempts(0);
+            employee.setAccountLockedUntil(null);
             employeeRepository.save(employee);
         }
         passwordResetToken.setUsed(true);
         passwordResetTokenRepository.save(passwordResetToken);
+
+        String targetEmail = user != null ? user.getEmail() : employee.getEmail();
+        accountLockoutService.recordSuccess(targetEmail);
+
         return "Password reset successfully!";
 
     }

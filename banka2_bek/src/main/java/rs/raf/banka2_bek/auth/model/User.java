@@ -5,6 +5,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -59,29 +60,12 @@ public class User implements UserDetails {
     @Column(nullable = false, length = 50)
     private String role = "CLIENT";
 
-    /*
-     * // TODO [B2 - Validacija + brute-force | Nosilac: Andjela Vilcek]
-     *
-     * Dodati sledeca dva polja radi DB-baziranog brute-force lockout-a
-     * (zamena za trenutnu Caffeine in-memory implementaciju u
-     * AccountLockoutService koja ne preziva restart i ne radi u
-     * multi-instance deploy-u):
-     *
-     *   @org.hibernate.annotations.ColumnDefault("0")
-     *   @Column(nullable = false)
-     *   private Integer failedLoginAttempts = 0;
-     *
-     *   @Column(nullable = true)
-     *   private java.time.LocalDateTime accountLockedUntil;
-     *
-     * Napomene:
-     * - Hibernate ddl-auto=update automatski doda kolone pri sledecem startu.
-     * - Dodati odgovarajuce getter/setter metode.
-     * - isAccountNonLocked() (linija ~130) treba da vrati
-     *   accountLockedUntil == null || accountLockedUntil.isBefore(LocalDateTime.now())
-     *   umesto hard-coded true.
-     * - Videti AccountLockoutService.java za detalje migracije logike.
-     */
+    @org.hibernate.annotations.ColumnDefault("0")
+    @Column(nullable = false)
+    private Integer failedLoginAttempts = 0;
+
+    @Column(nullable = true)
+    private LocalDateTime accountLockedUntil;
 
     public User() {
     }
@@ -151,7 +135,7 @@ public class User implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return true;
+        return accountLockedUntil == null || accountLockedUntil.isBefore(LocalDateTime.now());
     }
 
     @Override
@@ -222,5 +206,21 @@ public class User implements UserDetails {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public Integer getFailedLoginAttempts() {
+        return failedLoginAttempts;
+    }
+
+    public void setFailedLoginAttempts(Integer failedLoginAttempts) {
+        this.failedLoginAttempts = failedLoginAttempts;
+    }
+
+    public LocalDateTime getAccountLockedUntil() {
+        return accountLockedUntil;
+    }
+
+    public void setAccountLockedUntil(LocalDateTime accountLockedUntil) {
+        this.accountLockedUntil = accountLockedUntil;
     }
 }

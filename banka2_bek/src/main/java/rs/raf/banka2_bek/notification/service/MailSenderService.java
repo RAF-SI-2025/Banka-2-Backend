@@ -5,6 +5,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import rs.raf.banka2_bek.notification.event.InAppNotificationEvent;
 import rs.raf.banka2_bek.notification.template.AccountCreatedConfirmationEmailTemplate;
+import rs.raf.banka2_bek.notification.template.AccountLockedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationConfirmedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationEmailTemplate;
 import rs.raf.banka2_bek.notification.template.OtpEmailTemplate;
@@ -47,13 +48,6 @@ import java.time.LocalDate;
  *      loan, order, otc calls NotificationService.notify() on the relevant
  *      event — notify() takes care of everything else.
  *
- * ── TODO [B2 — Andjela Vilcek] ───────────────────────────────────────────
- *   Add sendAccountLockedMail(String toEmail, int lockMinutes, String resetLink)
- *   using a dedicated template (or extend TransactionEmailTemplate). The
- *   ACCOUNT_LOCKED type already has sendsEmail = true, so the generic email
- *   is currently sent; a dedicated template with the reset-password link
- *   improves user experience. The method is called from AccountLockoutService
- *   when the account is locked (after 5 failed login attempts).
  */
 @Service
 public class MailSenderService {
@@ -65,6 +59,7 @@ public class MailSenderService {
     private final String activationUrlBase;
     private final String activationPagePath;
     private final PasswordResetEmailTemplate passwordResetEmailTemplate;
+    private final AccountLockedEmailTemplate accountLockedEmailTemplate;
     private final ActivationEmailTemplate activationEmailTemplate;
     private final ActivationConfirmedEmailTemplate activationConfirmedEmailTemplate;
     private final AccountCreatedConfirmationEmailTemplate accountCreatedConfirmationEmailTemplate;
@@ -73,6 +68,7 @@ public class MailSenderService {
 
     public MailSenderService(JavaMailSender mailSender,
                              PasswordResetEmailTemplate passwordResetEmailTemplate,
+                             AccountLockedEmailTemplate accountLockedEmailTemplate,
                              ActivationEmailTemplate activationEmailTemplate,
                              ActivationConfirmedEmailTemplate activationConfirmedEmailTemplate,
                              AccountCreatedConfirmationEmailTemplate accountCreatedConfirmationEmailTemplate,
@@ -85,6 +81,7 @@ public class MailSenderService {
                              @Value("${notification.activation-page-path:/activate-account}") String activationPagePath) {
         this.mailSender = mailSender;
         this.passwordResetEmailTemplate = passwordResetEmailTemplate;
+        this.accountLockedEmailTemplate = accountLockedEmailTemplate;
         this.activationEmailTemplate = activationEmailTemplate;
         this.activationConfirmedEmailTemplate = activationConfirmedEmailTemplate;
         this.fromAddress = fromAddress;
@@ -102,6 +99,13 @@ public class MailSenderService {
         String subject = passwordResetEmailTemplate.buildSubject();
         String html = passwordResetEmailTemplate.buildBody(resetLink);
 
+        HtmlMailSender.sendHtmlMail(mailSender, fromAddress, toEmail, subject, html);
+    }
+
+    public void sendAccountLockedMail(String toEmail, int lockMinutes) {
+        String resetLink = passwordResetUrlBase + passwordResetPagePath;
+        String subject = accountLockedEmailTemplate.buildSubject();
+        String html = accountLockedEmailTemplate.buildBody(lockMinutes, resetLink);
         HtmlMailSender.sendHtmlMail(mailSender, fromAddress, toEmail, subject, html);
     }
 

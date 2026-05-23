@@ -11,6 +11,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import rs.raf.banka2_bek.notification.event.InAppNotificationEvent;
 import rs.raf.banka2_bek.notification.model.NotificationType;
 import rs.raf.banka2_bek.notification.template.AccountCreatedConfirmationEmailTemplate;
+import rs.raf.banka2_bek.notification.template.AccountLockedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationConfirmedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationEmailTemplate;
 import rs.raf.banka2_bek.notification.template.OtpEmailTemplate;
@@ -35,6 +36,7 @@ class MailSenderServiceInAppNotificationTest {
     @Mock private AccountCreatedConfirmationEmailTemplate accountCreatedConfirmationEmailTemplate;
     @Mock private OtpEmailTemplate otpEmailTemplate;
     @Mock private TransactionEmailTemplate transactionEmailTemplate;
+    @Mock private AccountLockedEmailTemplate accountLockedEmailTemplate;
 
     private JavaMailSender mailSender;
     private MimeMessage realMessage;
@@ -47,7 +49,7 @@ class MailSenderServiceInAppNotificationTest {
         when(mailSender.createMimeMessage()).thenReturn(realMessage);
 
         service = new MailSenderService(mailSender,
-                passwordResetEmailTemplate, activationEmailTemplate,
+                passwordResetEmailTemplate, accountLockedEmailTemplate, activationEmailTemplate,
                 activationConfirmedEmailTemplate, accountCreatedConfirmationEmailTemplate,
                 otpEmailTemplate, transactionEmailTemplate,
                 "from@test.com", "http://localhost", "/reset",
