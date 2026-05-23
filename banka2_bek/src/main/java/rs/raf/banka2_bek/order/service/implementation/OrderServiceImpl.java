@@ -45,13 +45,15 @@ import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.util.ListingCurrencyResolver;
+import rs.raf.banka2_bek.audit.model.AuditActionType;
+import rs.raf.banka2_bek.audit.service.AuditLogService;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-// TODO [B4 + B7 - Notifikacije + audit | Nosioci: Petar Poznanovic, Stasa Draskovic]
+// TODO [B4 + B7 - Notifikacije + audit | Nosioci: Petar Poznanovic, Stasa Dragovic]
 //
 // [B4 - Okidaci notifikacija | Petar Poznanovic]
 // Na sledecim lifecycle dogadjajima ordera pozvati notifikacioni servis:
@@ -66,7 +68,7 @@ import java.util.Optional;
 //   4. Order automatski otkazan (status DECLINED, cleanup scheduler) ->
 //        notifikacioniServis.posaljiOrderOtkazanNotifikaciju(order, razlog);
 //
-// [B7 - Audit hook | Stasa Draskovic]
+// [B7 - Audit hook | Stasa Dragovic]
 // Pri odobravanju i odbijanju ordera od strane supervizora evidentirati akciju
 // u audit log. Videti takodje OrderController.
 //   - approveOrder() -> posle order.setStatus(APPROVED) i save:
@@ -93,6 +95,7 @@ public class OrderServiceImpl implements OrderService {
     private final CurrencyConversionService currencyConversionService;
     private final PortfolioRepository portfolioRepository;
     private final InvestmentFundRepository investmentFundRepository;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -453,6 +456,12 @@ public class OrderServiceImpl implements OrderService {
             });
         }
 
+        auditLogService.record(
+                resolveCurrentUser().userId(), "EMPLOYEE",
+                AuditActionType.ORDER_APPROVED,
+                "Order approved: " + saved.getId(),
+                "ORDER", saved.getId());
+
         return toDtoWithUserName(saved);
     }
 
@@ -587,6 +596,13 @@ public class OrderServiceImpl implements OrderService {
         order.setLastModification(LocalDateTime.now());
         order.setApprovedBy(getSupervisorName()); // audit trail ko je skratio order
         Order saved = orderRepository.save(order);
+
+        auditLogService.record(
+                resolveCurrentUser().userId(), "EMPLOYEE",
+                AuditActionType.ORDER_DECLINED,
+                "Order declined: " + saved.getId(),
+                "ORDER", saved.getId());
+
         return toDtoWithUserName(saved);
     }
 

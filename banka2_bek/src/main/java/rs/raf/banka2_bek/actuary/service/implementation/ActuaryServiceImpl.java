@@ -14,13 +14,16 @@ import rs.raf.banka2_bek.actuary.model.ActuaryInfo;
 import rs.raf.banka2_bek.actuary.model.ActuaryType;
 import rs.raf.banka2_bek.actuary.repository.ActuaryInfoRepository;
 import rs.raf.banka2_bek.actuary.service.ActuaryService;
+import rs.raf.banka2_bek.audit.model.AuditActionType;
+import rs.raf.banka2_bek.audit.service.AuditLogService;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /*
- * TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+ * TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
  *
  * Pri promeni limita agentu (updateLimit) i pri resetovanju iskoriscenog
  * limita (resetUsedLimit / ActuaryLimitResetScheduler) evidentirati akciju
@@ -39,6 +42,8 @@ import java.util.stream.Collectors;
 public class ActuaryServiceImpl implements ActuaryService {
 
     private final ActuaryInfoRepository actuaryInfoRepository;
+    private final AuditLogService auditLogService;
+    private final EmployeeRepository employeeRepository;
 
     @Override
     public List<ActuaryInfoDto> getAgents(String email, String firstName, String lastName, String position) {
@@ -84,12 +89,24 @@ public class ActuaryServiceImpl implements ActuaryService {
             throw new RuntimeException("Limits can only be updated for agents.");
         }
 
+        BigDecimal oldLimit = targetUserInfo.getDailyLimit();
+        Boolean oldNeedApproval = targetUserInfo.isNeedApproval();
+
         targetUserInfo.setDailyLimit(dto.getDailyLimit() != null ? dto.getDailyLimit() : targetUserInfo.getDailyLimit());
         targetUserInfo.setNeedApproval(dto.getNeedApproval() != null ? dto.getNeedApproval() : targetUserInfo.isNeedApproval());
 
         actuaryInfoRepository.save(targetUserInfo);
-        ActuaryInfoDto response = ActuaryMapper.toDto(targetUserInfo);
-        return response;
+
+        Long actorId = currentUserInfo.getEmployee().getId();
+        auditLogService.record(
+                actorId, "EMPLOYEE", AuditActionType.LIMIT_CHANGED,
+                "Agent limit updated for employee " + employeeId,
+                "ACTUARY", employeeId,
+                "dailyLimit=" + oldLimit + ",needApproval=" + oldNeedApproval,
+                "dailyLimit=" + targetUserInfo.getDailyLimit() + ",needApproval=" + targetUserInfo.isNeedApproval()
+        );
+
+        return ActuaryMapper.toDto(targetUserInfo);
     }
   
 
@@ -105,8 +122,35 @@ public class ActuaryServiceImpl implements ActuaryService {
             throw new IllegalStateException("Reset is only allowed for Agents. Supervisors do not have limits.");
         }
 
+        BigDecimal oldUsed = actuary.getUsedLimit();
         actuary.setUsedLimit(BigDecimal.ZERO);
         ActuaryInfo updatedActuary = actuaryInfoRepository.save(actuary);
+
+        Long actorId;
+        String actorType;
+        try {
+            String username = getAuthenticatedUsername();
+            var empOpt = employeeRepository.findByEmail(username);
+            if (empOpt.isPresent()) {
+                actorId = empOpt.get().getId();
+                actorType = "EMPLOYEE";
+            } else {
+                actorId = 0L;
+                actorType = "SCHEDULER";
+            }
+        } catch (IllegalStateException e) {
+            actorId = 0L;
+            actorType = "SCHEDULER";
+        }
+
+        auditLogService.record(
+                actorId, actorType, AuditActionType.USED_LIMIT_RESET,
+                "Used limit reset for agent " + employeeId,
+                "ACTUARY", employeeId,
+                String.valueOf(oldUsed),
+                "0"
+        );
+
         return ActuaryMapper.toDto(updatedActuary);
     }
 
