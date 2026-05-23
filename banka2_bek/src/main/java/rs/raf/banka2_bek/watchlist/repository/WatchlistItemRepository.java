@@ -23,7 +23,26 @@ package rs.raf.banka2_bek.watchlist.repository;
 // ============================================================
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.transaction.annotation.Transactional;
 import rs.raf.banka2_bek.watchlist.model.WatchlistItem;
 
+import java.util.List;
+import java.util.Optional;
+
 public interface WatchlistItemRepository extends JpaRepository<WatchlistItem, Long> {
+
+    List<WatchlistItem> findByWatchlistIdOrderByAddedAtAsc(Long watchlistId);
+
+    Optional<WatchlistItem> findByWatchlistIdAndListingId(Long watchlistId, Long listingId);
+
+    @Modifying
+    @Transactional
+    void deleteByWatchlistIdAndListingId(Long watchlistId, Long listingId);
+
+    @Modifying
+    @Transactional
+    void deleteAllByWatchlistId(Long watchlistId);
+
+    boolean existsByWatchlistIdAndListingId(Long watchlistId, Long listingId);
 }
