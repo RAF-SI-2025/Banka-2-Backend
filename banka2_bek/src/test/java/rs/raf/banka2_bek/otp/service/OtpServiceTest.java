@@ -5,344 +5,183 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import rs.raf.banka2_bek.auth.model.User;
+import rs.raf.banka2_bek.auth.repository.UserRepository;
 import rs.raf.banka2_bek.notification.service.MailSenderService;
-import rs.raf.banka2_bek.otp.model.OtpVerification;
-import rs.raf.banka2_bek.otp.repository.OtpVerificationRepository;
+import rs.raf.banka2_bek.otp.model.TotpSecret;
+import rs.raf.banka2_bek.otp.repository.TotpSecretRepository;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class OtpServiceTest {
 
-    @Mock private OtpVerificationRepository otpRepository;
+    @Mock private UserRepository userRepository;
+    @Mock private TotpService totpService;
+    @Mock private TotpSecretRepository totpSecretRepository;
     @Mock private MailSenderService mailSenderService;
 
     private OtpService otpService;
 
-    private static final int EXPIRY_MINUTES = 5;
-    private static final int MAX_ATTEMPTS = 3;
+    private static final int EMAIL_EXPIRY_MINUTES = 5;
+    private static final String EMAIL = "user@test.com";
+    private static final Long USER_ID = 7L;
 
     @BeforeEach
     void setUp() {
-        otpService = new OtpService(otpRepository, mailSenderService, EXPIRY_MINUTES, MAX_ATTEMPTS);
+        otpService = new OtpService(
+                userRepository, totpService, totpSecretRepository, mailSenderService, EMAIL_EXPIRY_MINUTES);
     }
 
-    // ===== generateAndSend =====
+    private User user() {
+        User u = new User();
+        u.setId(USER_ID);
+        u.setEmail(EMAIL);
+        return u;
+    }
 
     @Nested
     @DisplayName("generateAndSend")
     class GenerateAndSend {
 
         @Test
-        @DisplayName("creates new OTP and saves it")
-        void createsNewOtp() {
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.empty());
-            when(otpRepository.save(any(OtpVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        @DisplayName("generates new TOTP secret when user has none, sends no email")
+        void generatesSecretWhenMissing() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpSecretRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+            when(totpService.generateSecret(USER_ID)).thenReturn("NEWSECRET");
 
-            otpService.generateAndSend("user@test.com");
+            otpService.generateAndSend(EMAIL);
 
-            ArgumentCaptor<OtpVerification> captor = ArgumentCaptor.forClass(OtpVerification.class);
-            verify(otpRepository).save(captor.capture());
-
-            OtpVerification saved = captor.getValue();
-            assertThat(saved.getEmail()).isEqualTo("user@test.com");
-            assertThat(saved.getCode()).matches("\\d{6}");
-            assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now());
-            assertThat(saved.getExpiresAt()).isBefore(LocalDateTime.now().plusMinutes(EXPIRY_MINUTES + 1));
-        }
-
-        @Test
-        @DisplayName("invalidates existing unused OTP before creating new one")
-        void invalidatesExistingOtp() {
-            OtpVerification existing = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(0).build();
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(existing));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            otpService.generateAndSend("user@test.com");
-
-            // Existing OTP should be marked as used
-            assertThat(existing.getUsed()).isTrue();
-            // save called twice: once for invalidation, once for new OTP
-            verify(otpRepository, times(2)).save(any(OtpVerification.class));
-        }
-
-        @Test
-        @DisplayName("does not send email (OTP shown on mobile app)")
-        void doesNotSendEmail() {
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.empty());
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            otpService.generateAndSend("user@test.com");
-
+            verify(totpService).generateSecret(USER_ID);
             verifyNoInteractions(mailSenderService);
         }
-    }
 
-    // ===== generateAndSendViaEmail =====
+        @Test
+        @DisplayName("keeps existing secret when user already has one")
+        void keepsExistingSecret() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpSecretRepository.findByUserId(USER_ID))
+                    .thenReturn(Optional.of(TotpSecret.builder().userId(USER_ID).secret("EXIST").build()));
+
+            otpService.generateAndSend(EMAIL);
+
+            verify(totpService, never()).generateSecret(USER_ID);
+            verifyNoInteractions(mailSenderService);
+        }
+
+        @Test
+        @DisplayName("throws when user not found")
+        void throwsWhenUserMissing() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> otpService.generateAndSend(EMAIL))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Korisnik nije pronadjen");
+        }
+    }
 
     @Nested
     @DisplayName("generateAndSendViaEmail")
     class GenerateAndSendViaEmail {
 
         @Test
-        @DisplayName("creates OTP and sends email")
-        void createsAndSendsEmail() {
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.empty());
-            when(otpRepository.save(any(OtpVerification.class))).thenAnswer(inv -> inv.getArgument(0));
+        @DisplayName("computes current TOTP code and emails it")
+        void emailsCurrentCode() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            String secret = "JBSWY3DPEHPK3PXP";
+            when(totpSecretRepository.findByUserId(USER_ID))
+                    .thenReturn(Optional.of(TotpSecret.builder().userId(USER_ID).secret(secret).build()));
 
-            otpService.generateAndSendViaEmail("user@test.com");
+            otpService.generateAndSendViaEmail(EMAIL);
 
-            ArgumentCaptor<OtpVerification> captor = ArgumentCaptor.forClass(OtpVerification.class);
-            verify(otpRepository).save(captor.capture());
-
-            OtpVerification saved = captor.getValue();
-            assertThat(saved.getCode()).matches("\\d{6}");
-
-            verify(mailSenderService).sendOtpMail(
-                    eq("user@test.com"), eq(saved.getCode()), eq(EXPIRY_MINUTES));
-        }
-
-        @Test
-        @DisplayName("invalidates existing OTP before sending new one via email")
-        void invalidatesExisting() {
-            OtpVerification existing = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("111111")
-                    .expiresAt(LocalDateTime.now().plusMinutes(2))
-                    .used(false).attempts(0).build();
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(existing));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            otpService.generateAndSendViaEmail("user@test.com");
-
-            assertThat(existing.getUsed()).isTrue();
-            verify(mailSenderService).sendOtpMail(eq("user@test.com"), anyString(), eq(EXPIRY_MINUTES));
+            verify(mailSenderService).sendOtpMail(eq(EMAIL), anyString(), eq(EMAIL_EXPIRY_MINUTES));
         }
     }
-
-    // ===== getActiveOtp =====
 
     @Nested
     @DisplayName("getActiveOtp")
     class GetActiveOtp {
 
         @Test
-        @DisplayName("returns active OTP details when valid OTP exists")
-        void returnsActiveOtp() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("654321")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(1).build();
+        @DisplayName("returns active=true with 6-digit code and seconds left in 30s window")
+        void returnsActiveCode() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpSecretRepository.findByUserId(USER_ID))
+                    .thenReturn(Optional.of(TotpSecret.builder().userId(USER_ID).secret("JBSWY3DPEHPK3PXP").build()));
 
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-
-            Map<String, Object> result = otpService.getActiveOtp("user@test.com");
+            Map<String, Object> result = otpService.getActiveOtp(EMAIL);
 
             assertThat(result.get("active")).isEqualTo(true);
-            assertThat(result.get("code")).isEqualTo("654321");
-            assertThat((long) result.get("expiresInSeconds")).isPositive();
-            assertThat(result.get("attempts")).isEqualTo(1);
-            assertThat(result.get("maxAttempts")).isEqualTo(MAX_ATTEMPTS);
-        }
-
-        @Test
-        @DisplayName("returns inactive when no OTP exists")
-        void returnsInactiveWhenNoOtp() {
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.empty());
-
-            Map<String, Object> result = otpService.getActiveOtp("user@test.com");
-
-            assertThat(result.get("active")).isEqualTo(false);
-            assertThat((String) result.get("message")).contains("Nema aktivnog");
-        }
-
-        @Test
-        @DisplayName("returns inactive when OTP is expired")
-        void returnsInactiveWhenExpired() {
-            OtpVerification expired = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("111111")
-                    .expiresAt(LocalDateTime.now().minusMinutes(1)) // expired
-                    .used(false).attempts(0).build();
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(expired));
-
-            Map<String, Object> result = otpService.getActiveOtp("user@test.com");
-
-            assertThat(result.get("active")).isEqualTo(false);
+            assertThat((String) result.get("code")).matches("\\d{6}");
+            assertThat((long) result.get("expiresInSeconds")).isBetween(1L, 30L);
         }
     }
-
-    // ===== verify =====
 
     @Nested
     @DisplayName("verify")
     class Verify {
 
         @Test
-        @DisplayName("returns verified=true for correct code")
-        void correctCode() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(0).build();
+        @DisplayName("delegates to TotpService and returns verified=true on success")
+        void verifiedTrue() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpService.verify(USER_ID, "123456")).thenReturn(true);
 
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "123456");
+            Map<String, Object> result = otpService.verify(EMAIL, "123456");
 
             assertThat(result.get("verified")).isEqualTo(true);
             assertThat((String) result.get("message")).contains("uspesno");
-            assertThat(otp.getUsed()).isTrue();
         }
 
         @Test
-        @DisplayName("returns verified=false for wrong code and increments attempts")
-        void wrongCode() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(0).build();
+        @DisplayName("returns verified=false when TOTP code mismatches")
+        void verifiedFalse() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpService.verify(USER_ID, "999999")).thenReturn(false);
 
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "999999");
+            Map<String, Object> result = otpService.verify(EMAIL, "999999");
 
             assertThat(result.get("verified")).isEqualTo(false);
             assertThat(result.get("blocked")).isEqualTo(false);
             assertThat((String) result.get("message")).contains("Pogresan");
-            assertThat(otp.getAttempts()).isEqualTo(1);
         }
 
         @Test
-        @DisplayName("returns verified=false when OTP not found")
-        void otpNotFound() {
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.empty());
+        @DisplayName("returns 'nije pronadjen' when user not found")
+        void userNotFound() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
 
-            Map<String, Object> result = otpService.verify("user@test.com", "123456");
+            Map<String, Object> result = otpService.verify(EMAIL, "123456");
 
             assertThat(result.get("verified")).isEqualTo(false);
-            assertThat(result.get("blocked")).isEqualTo(false);
             assertThat((String) result.get("message")).contains("nije pronadjen");
+            verifyNoInteractions(totpService);
         }
 
         @Test
-        @DisplayName("returns verified=false and marks used when OTP expired")
-        void expiredOtp() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().minusMinutes(1)) // expired
-                    .used(false).attempts(0).build();
+        @DisplayName("returns 'nije pronadjen' when no TOTP secret configured")
+        void noSecret() {
+            when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user()));
+            when(totpService.verify(USER_ID, "123456"))
+                    .thenThrow(new IllegalStateException("TOTP nije podesen za korisnika " + USER_ID));
 
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "123456");
+            Map<String, Object> result = otpService.verify(EMAIL, "123456");
 
             assertThat(result.get("verified")).isEqualTo(false);
-            assertThat((String) result.get("message")).contains("istekao");
-            assertThat(otp.getUsed()).isTrue();
-        }
-
-        @Test
-        @DisplayName("blocks when max attempts already reached")
-        void maxAttemptsReached() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(MAX_ATTEMPTS).build(); // already at max
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "999999");
-
-            assertThat(result.get("verified")).isEqualTo(false);
-            assertThat(result.get("blocked")).isEqualTo(true);
-            assertThat((String) result.get("message")).contains("otkazana");
-            assertThat(otp.getUsed()).isTrue();
-        }
-
-        @Test
-        @DisplayName("blocks on the attempt that reaches max attempts")
-        void blocksOnLastAttempt() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(MAX_ATTEMPTS - 1).build(); // one attempt left
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "999999");
-
-            assertThat(result.get("verified")).isEqualTo(false);
-            assertThat(result.get("blocked")).isEqualTo(true);
-            assertThat(otp.getUsed()).isTrue();
-            assertThat(otp.getAttempts()).isEqualTo(MAX_ATTEMPTS);
-        }
-
-        @Test
-        @DisplayName("decrements remaining attempts message on wrong code")
-        void remainingAttemptsMessage() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(0).build();
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "000000");
-
-            assertThat((String) result.get("message")).contains("Preostalo pokusaja: 2");
-        }
-
-        @Test
-        @DisplayName("correct code succeeds even after failed attempts")
-        void correctCodeAfterFailedAttempts() {
-            OtpVerification otp = OtpVerification.builder()
-                    .id(1L).email("user@test.com").code("123456")
-                    .expiresAt(LocalDateTime.now().plusMinutes(3))
-                    .used(false).attempts(2).build(); // 2 failed, 1 left
-
-            when(otpRepository.findTopByEmailAndUsedFalseOrderByCreatedAtDesc("user@test.com"))
-                    .thenReturn(Optional.of(otp));
-            when(otpRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-            Map<String, Object> result = otpService.verify("user@test.com", "123456");
-
-            assertThat(result.get("verified")).isEqualTo(true);
-            assertThat(otp.getUsed()).isTrue();
+            assertThat((String) result.get("message")).contains("nije pronadjen");
         }
     }
 }
