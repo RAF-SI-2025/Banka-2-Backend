@@ -1,5 +1,11 @@
 package rs.raf.banka2_bek.otc.dto;
 
+import lombok.*;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
 // ============================================================
 // TODO [B10 - Istorija OTC pregovora | Nosilac: Aja Timotic]
 //
@@ -50,6 +56,29 @@ package rs.raf.banka2_bek.otc.dto;
 // Konvencija: pratiti paket `savings` kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B10.
 // ============================================================
-
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class OtcNegotiationHistoryDto {
+    private Long id;
+
+    private Long negotiationId;
+
+    private Integer quantity;
+
+    private BigDecimal pricePerShare;
+
+    private BigDecimal premium;
+
+    private LocalDate settlementDate;
+
+    private String status;
+
+    private Long modifiedById;
+
+    private String modifiedByName;
+
+    private LocalDateTime createdAt;
 }
