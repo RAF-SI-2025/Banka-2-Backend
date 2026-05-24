@@ -31,6 +31,8 @@ import rs.raf.banka2_bek.otc.repository.OtcContractRepository;
 import rs.raf.banka2_bek.otc.repository.OtcOfferRepository;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
+import rs.raf.banka2_bek.notification.model.NotificationType;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 import rs.raf.banka2_bek.stock.model.Listing;
 import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
@@ -88,6 +90,8 @@ public class OtcService {
     private final UserResolver userResolver;
     private final String bankRegistrationNumber;
 
+    private final NotificationService notificationService;
+
     public OtcService(OtcOfferRepository offerRepository,
                       OtcContractRepository contractRepository,
                       PortfolioRepository portfolioRepository,
@@ -95,7 +99,8 @@ public class OtcService {
                       AccountRepository accountRepository,
                       CurrencyConversionService currencyConversionService,
                       UserResolver userResolver,
-                      @Value("${bank.registration-number}") String bankRegistrationNumber) {
+                      @Value("${bank.registration-number}") String bankRegistrationNumber,
+                      NotificationService notificationService) {
         this.offerRepository = offerRepository;
         this.contractRepository = contractRepository;
         this.portfolioRepository = portfolioRepository;
@@ -104,6 +109,7 @@ public class OtcService {
         this.currencyConversionService = currencyConversionService;
         this.userResolver = userResolver;
         this.bankRegistrationNumber = bankRegistrationNumber;
+        this.notificationService = notificationService;
     }
 
     // ────────────────────────── Discovery ──────────────────────────
@@ -247,7 +253,25 @@ public class OtcService {
         offer.setWaitingOnUserId(me.userId().equals(offer.getBuyerId())
                 ? offer.getSellerId() : offer.getBuyerId());
 
-        return mapOffer(offerRepository.save(offer), me.userId());
+        OtcOffer savedOffer = offerRepository.save(offer);
+
+        try {
+            String otherRole = savedOffer.getWaitingOnUserId().equals(savedOffer.getBuyerId())
+                    ? savedOffer.getBuyerRole() : savedOffer.getSellerRole();
+            notificationService.notify(
+                    savedOffer.getWaitingOnUserId(),
+                    otherRole,
+                    NotificationType.OTC_COUNTER_OFFER,
+                    "Nova kontraponuda",
+                    "Primili ste novu kontraponudu za " + savedOffer.getListing().getTicker() + ".",
+                    "OTC_OFFER",
+                    savedOffer.getId()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send OTC counter offer notification: {}", e.getMessage());
+        }
+
+        return mapOffer(savedOffer, me.userId());
     }
 
     @Transactional
@@ -258,7 +282,27 @@ public class OtcService {
         offer.setStatus(OtcOfferStatus.DECLINED);
         offer.setLastModifiedById(me.userId());
         offer.setLastModifiedByName(resolveUserName(me.userId(), me.userRole()));
-        return mapOffer(offerRepository.save(offer), me.userId());
+        OtcOffer savedOffer = offerRepository.save(offer);
+
+        try {
+            Long otherPartyId = me.userId().equals(savedOffer.getBuyerId())
+                    ? savedOffer.getSellerId() : savedOffer.getBuyerId();
+            String otherRole = me.userId().equals(savedOffer.getBuyerId())
+                    ? savedOffer.getSellerRole() : savedOffer.getBuyerRole();
+            notificationService.notify(
+                    otherPartyId,
+                    otherRole,
+                    NotificationType.OTC_DECLINED,
+                    "Ponuda odbijena",
+                    "Vaša OTC ponuda za " + savedOffer.getListing().getTicker() + " je odbijena.",
+                    "OTC_OFFER",
+                    savedOffer.getId()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send OTC declined notification: {}", e.getMessage());
+        }
+
+        return mapOffer(savedOffer, me.userId());
     }
 
     /**
@@ -350,6 +394,25 @@ public class OtcService {
         offerRepository.save(offer);
 
         log.info("OTC offer #{} accepted by {} — contract #{} created", offer.getId(), me.userId(), contract.getId());
+
+        try {
+            Long otherPartyId = me.userId().equals(contract.getBuyerId())
+                    ? contract.getSellerId() : contract.getBuyerId();
+            String otherRole = me.userId().equals(contract.getBuyerId())
+                    ? contract.getSellerRole() : contract.getBuyerRole();
+            notificationService.notify(
+                    otherPartyId,
+                    otherRole,
+                    NotificationType.OTC_ACCEPTED,
+                    "Ponuda prihvaćena",
+                    "Vaša OTC ponuda za " + contract.getListing().getTicker() + " je prihvaćena i opcioni ugovor je sklopljen.",
+                    "OTC_CONTRACT",
+                    contract.getId()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send OTC accepted notification: {}", e.getMessage());
+        }
+
         return mapOffer(offer, me.userId());
     }
 

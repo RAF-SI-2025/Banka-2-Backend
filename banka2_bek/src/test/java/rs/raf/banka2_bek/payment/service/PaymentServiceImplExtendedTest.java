@@ -36,6 +36,7 @@ import rs.raf.banka2_bek.interbank.service.BankRoutingService;
 import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import rs.raf.banka2_bek.interbank.service.InterbankPaymentAsyncService;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 import rs.raf.banka2_bek.transaction.service.TransactionService;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -71,6 +72,7 @@ class PaymentServiceImplExtendedTest {
     @Mock private TransactionExecutorService transactionExecutorService;
     @Mock private InterbankPaymentAsyncService interbankPaymentAsyncService;
     @Mock private InterbankTransactionRepository interbankTransactionRepository;
+    @Mock private NotificationService notificationService;
 
     private PaymentServiceImpl paymentService;
 
@@ -88,7 +90,7 @@ class PaymentServiceImplExtendedTest {
                 exchangeService, mailSenderService,
                 bankRoutingService, transactionExecutorService,
                 interbankPaymentAsyncService, interbankTransactionRepository,
-                "22200022");
+                "22200022", notificationService);
 
         lenient().when(bankRoutingService.isLocalAccount(any())).thenReturn(true);
 

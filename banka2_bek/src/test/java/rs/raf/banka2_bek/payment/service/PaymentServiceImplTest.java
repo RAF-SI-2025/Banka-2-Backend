@@ -32,6 +32,7 @@ import rs.raf.banka2_bek.interbank.service.BankRoutingService;
 import rs.raf.banka2_bek.interbank.service.TransactionExecutorService;
 import rs.raf.banka2_bek.interbank.service.InterbankPaymentAsyncService;
 import rs.raf.banka2_bek.interbank.repository.InterbankTransactionRepository;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 import rs.raf.banka2_bek.transaction.dto.TransactionResponseDto;
 import rs.raf.banka2_bek.transaction.dto.TransactionType;
 import rs.raf.banka2_bek.transaction.service.TransactionService;
@@ -77,6 +78,8 @@ class PaymentServiceImplTest {
     private InterbankPaymentAsyncService interbankPaymentAsyncService;
     @Mock
     private InterbankTransactionRepository interbankTransactionRepository;
+    @Mock
+    private NotificationService notificationService;
 
     private PaymentServiceImpl paymentService;
 
@@ -94,7 +97,7 @@ class PaymentServiceImplTest {
                 exchangeService, mailSenderService,
                 bankRoutingService, transactionExecutorService,
                 interbankPaymentAsyncService, interbankTransactionRepository,
-                "22200022");
+                "22200022", notificationService);
 
         lenient().when(bankRoutingService.isLocalAccount(any())).thenReturn(true);
 

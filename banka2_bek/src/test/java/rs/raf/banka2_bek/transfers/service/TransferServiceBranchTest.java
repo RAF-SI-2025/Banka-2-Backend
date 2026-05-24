@@ -26,6 +26,7 @@ import rs.raf.banka2_bek.transfers.dto.TransferFxRequestDto;
 import rs.raf.banka2_bek.transfers.dto.TransferInternalRequestDto;
 import rs.raf.banka2_bek.transfers.dto.TransferResponseDto;
 import rs.raf.banka2_bek.transfers.repository.TransferRepository;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -48,6 +49,7 @@ class TransferServiceBranchTest {
     @Mock private AccountRepository accountRepository;
     @Mock private ExchangeService exchangeService;
     @Mock private ClientRepository clientRepository;
+    @Mock private NotificationService notificationService;
 
     private TransferService transferService;
 
@@ -73,7 +75,7 @@ class TransferServiceBranchTest {
     void setUp() throws Exception {
         SecurityContextHolder.setStrategyName(SecurityContextHolder.MODE_GLOBAL);
         transferService = new TransferService(
-                transferRepository, accountRepository, exchangeService, clientRepository);
+                transferRepository, accountRepository, exchangeService, clientRepository, notificationService);
 
         java.lang.reflect.Field field = TransferService.class.getDeclaredField("bankRegistrationNumber");
         field.setAccessible(true);

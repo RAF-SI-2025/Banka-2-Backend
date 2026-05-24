@@ -20,7 +20,9 @@ import rs.raf.banka2_bek.card.repository.CardRepository;
 import rs.raf.banka2_bek.card.service.CardService;
 import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.client.repository.ClientRepository;
+import rs.raf.banka2_bek.notification.model.NotificationType;
 import rs.raf.banka2_bek.notification.service.MailSenderService;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -45,6 +47,7 @@ public class CardServiceImpl implements CardService {
     private final AccountRepository accountRepository;
     private final ClientRepository clientRepository;
     private final MailSenderService mailSenderService;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional
@@ -159,6 +162,22 @@ public class CardServiceImpl implements CardService {
             log.warn("Failed to send card notification email", e);
         }
 
+        if (card.getClient() != null) {
+            try {
+                notificationService.notify(
+                        card.getClient().getId(),
+                        "CLIENT",
+                        NotificationType.CARD_BLOCKED,
+                        "Kartica blokirana",
+                        "Vaša kartica je blokirana.",
+                        "CARD",
+                        card.getId()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to send card blocked notification: {}", e.getMessage());
+            }
+        }
+
         return response;
     }
 
@@ -180,6 +199,22 @@ public class CardServiceImpl implements CardService {
                     card.getClient().getEmail(), last4);
         } catch (Exception e) {
             log.warn("Failed to send card notification email", e);
+        }
+
+        if (card.getClient() != null) {
+            try {
+                notificationService.notify(
+                        card.getClient().getId(),
+                        "CLIENT",
+                        NotificationType.CARD_UNBLOCKED,
+                        "Kartica odblokirana",
+                        "Vaša kartica je uspešno odblokirana.",
+                        "CARD",
+                        card.getId()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to send card unblocked notification: {}", e.getMessage());
+            }
         }
 
         return response;
@@ -209,7 +244,25 @@ public class CardServiceImpl implements CardService {
             throw new RuntimeException("Ne moze se menjati limit deaktivirane kartice");
         }
         card.setCardLimit(newLimit);
-        return toMaskedResponse(cardRepository.save(card));
+        CardResponseDto limitResponse = toMaskedResponse(cardRepository.save(card));
+
+        if (card.getClient() != null) {
+            try {
+                notificationService.notify(
+                        card.getClient().getId(),
+                        "CLIENT",
+                        NotificationType.LIMIT_CHANGE,
+                        "Limit kartice promenjen",
+                        "Limit vaše kartice je uspešno promenjen na " + newLimit + ".",
+                        "CARD",
+                        card.getId()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to send card limit change notification: {}", e.getMessage());
+            }
+        }
+
+        return limitResponse;
     }
 
     // --- helpers ---

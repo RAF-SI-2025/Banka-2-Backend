@@ -1205,15 +1205,12 @@ class OrderServiceImplTest {
         void getMyOrders_client_returnsOnlyHisOrders() {
             mockSecurityContext("client@test.com");
             when(clientRepository.findByEmail("client@test.com")).thenReturn(Optional.of(testClient));
-
-            PageRequest pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
-            when(orderRepository.findByUserId(42L, pageable))
+            when(orderRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(org.springframework.data.domain.Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(makeOrder(1L, 42L))));
 
-            Page<OrderDto> result = orderService.getMyOrders(0, 20);
+            Page<OrderDto> result = orderService.getMyOrders(0, 20, null, null, null, null);
 
             assertEquals(1, result.getTotalElements());
-            verify(orderRepository).findByUserId(42L, pageable);
         }
 
         @Test
@@ -1222,12 +1219,10 @@ class OrderServiceImplTest {
             mockSecurityContext("agent@test.com");
             when(clientRepository.findByEmail("agent@test.com")).thenReturn(Optional.empty());
             when(employeeRepository.findByEmail("agent@test.com")).thenReturn(Optional.of(testEmployee));
-
-            PageRequest pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
-            when(orderRepository.findByUserId(99L, pageable))
+            when(orderRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), any(org.springframework.data.domain.Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(makeOrder(5L, 99L))));
 
-            Page<OrderDto> result = orderService.getMyOrders(0, 20);
+            Page<OrderDto> result = orderService.getMyOrders(0, 20, null, null, null, null);
 
             assertEquals(1, result.getTotalElements());
         }
@@ -1239,7 +1234,7 @@ class OrderServiceImplTest {
             when(clientRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
             when(employeeRepository.findByEmail("unknown@test.com")).thenReturn(Optional.empty());
 
-            assertThrows(EntityNotFoundException.class, () -> orderService.getMyOrders(0, 20));
+            assertThrows(EntityNotFoundException.class, () -> orderService.getMyOrders(0, 20, null, null, null, null));
         }
     }
 

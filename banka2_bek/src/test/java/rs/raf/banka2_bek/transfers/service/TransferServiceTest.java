@@ -23,6 +23,7 @@ import rs.raf.banka2_bek.transfers.dto.TransferInternalRequestDto;
 import rs.raf.banka2_bek.transfers.dto.TransferResponseDto;
 import rs.raf.banka2_bek.account.repository.AccountRepository;
 import rs.raf.banka2_bek.transfers.repository.TransferRepository;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -51,6 +52,9 @@ public class TransferServiceTest {
     @Mock
     private ClientRepository clientRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
     private TransferService transferService;
 
     private Account fromAccount;
@@ -75,7 +79,7 @@ public class TransferServiceTest {
         SecurityContextHolder.setStrategyName(SecurityContextHolder.MODE_GLOBAL);
         transferService = new TransferService(
                 transferRepository, accountRepository, exchangeService,
-                clientRepository);
+                clientRepository, notificationService);
         java.lang.reflect.Field field = TransferService.class.getDeclaredField("bankRegistrationNumber");
         field.setAccessible(true);
         field.set(transferService, "22200022");

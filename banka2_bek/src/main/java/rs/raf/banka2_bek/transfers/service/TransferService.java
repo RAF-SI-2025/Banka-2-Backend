@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.transfers.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,6 +9,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import rs.raf.banka2_bek.account.model.Account;
 import rs.raf.banka2_bek.account.model.AccountStatus;
+import rs.raf.banka2_bek.notification.model.NotificationType;
+import rs.raf.banka2_bek.notification.service.NotificationService;
 import rs.raf.banka2_bek.client.model.Client;
 import rs.raf.banka2_bek.exchange.dto.CalculateExchangeResponseDto;
 import rs.raf.banka2_bek.payment.model.PaymentStatus;
@@ -33,6 +36,7 @@ import java.util.UUID;
 //       notifikacioniServis.posaljiUspesanTransferNotifikaciju(transfer);
 //   - executeFxTransfer() -> analogno posle FX konverzije i save.
 // Notifikacioni servis treba da bude injektovan kao zavisnost (@Autowired ili konstruktor).
+@Slf4j
 @Service
 public class TransferService {
 
@@ -41,17 +45,21 @@ public class TransferService {
     private final ExchangeService exchangeService;
     private final ClientRepository clientRepository;
 
+    private final NotificationService notificationService;
+
     @Value("${bank.registration-number}")
     private String bankRegistrationNumber;
 
     public TransferService(TransferRepository transferRepository,
                            AccountRepository accountRepository,
                            ExchangeService exchangeService,
-                           ClientRepository clientRepository) {
+                           ClientRepository clientRepository,
+                           NotificationService notificationService) {
         this.transferRepository = transferRepository;
         this.accountRepository = accountRepository;
         this.exchangeService = exchangeService;
         this.clientRepository = clientRepository;
+        this.notificationService = notificationService;
     }
 
     private TransferResponseDto mapToDto(Transfer transfer) {
@@ -135,6 +143,20 @@ public class TransferService {
         transfer.setCreatedBy(actor);
 
         transferRepository.save(transfer);
+
+        try {
+            notificationService.notify(
+                    actor.getId(),
+                    "CLIENT",
+                    NotificationType.TRANSFER,
+                    "Transfer izvršen",
+                    "Vaš interni transfer od " + request.getAmount() + " " + fromAccount.getCurrency().getCode() + " je uspešno izvršen.",
+                    "TRANSFER",
+                    transfer.getId()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send transfer notification: {}", e.getMessage());
+        }
 
         return mapToDto(transfer);
     }
@@ -239,6 +261,20 @@ public class TransferService {
         transfer.setCreatedBy(actor);
 
         transferRepository.save(transfer);
+
+        try {
+            notificationService.notify(
+                    actor.getId(),
+                    "CLIENT",
+                    NotificationType.TRANSFER,
+                    "FX transfer izvršen",
+                    "Vaš devizni transfer od " + request.getAmount() + " " + fromAccount.getCurrency().getCode() + " je uspešno izvršen.",
+                    "TRANSFER",
+                    transfer.getId()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send FX transfer notification: {}", e.getMessage());
+        }
 
         return mapToDto(transfer);
     }

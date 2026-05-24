@@ -43,10 +43,16 @@ import org.springframework.security.access.AccessDeniedException;
 import rs.raf.banka2_bek.portfolio.model.Portfolio;
 import rs.raf.banka2_bek.portfolio.repository.PortfolioRepository;
 import rs.raf.banka2_bek.stock.model.Listing;
+import rs.raf.banka2_bek.stock.model.ListingType;
 import rs.raf.banka2_bek.stock.repository.ListingRepository;
 import rs.raf.banka2_bek.stock.util.ListingCurrencyResolver;
+import rs.raf.banka2_bek.notification.model.NotificationType;
+import rs.raf.banka2_bek.notification.service.NotificationService;
+import org.springframework.data.jpa.domain.Specification;
+import rs.raf.banka2_bek.order.repository.OrderSpecification;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -93,6 +99,7 @@ public class OrderServiceImpl implements OrderService {
     private final CurrencyConversionService currencyConversionService;
     private final PortfolioRepository portfolioRepository;
     private final InvestmentFundRepository investmentFundRepository;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional
@@ -286,6 +293,23 @@ public class OrderServiceImpl implements OrderService {
 
         // Step 12: Execution handled by OrderScheduler cron job
 
+        if (savedOrder.getStatus() == OrderStatus.PENDING) {
+            try {
+                notificationService.notify(
+                        savedOrder.getUserId(),
+                        savedOrder.getUserRole(),
+                        NotificationType.ORDER_PENDING,
+                        "Nalog čeka odobrenje",
+                        "Vaš nalog za " + savedOrder.getListing().getTicker() + " je kreiran i čeka odobrenje supervizora.",
+                        "ORDER",
+                        savedOrder.getId()
+                );
+            } catch (Exception e) {
+                org.slf4j.LoggerFactory.getLogger(OrderServiceImpl.class)
+                        .warn("Failed to send order pending notification: {}", e.getMessage());
+            }
+        }
+
         return toDtoWithUserName(savedOrder);
     }
 
@@ -453,6 +477,21 @@ public class OrderServiceImpl implements OrderService {
             });
         }
 
+        try {
+            notificationService.notify(
+                    saved.getUserId(),
+                    saved.getUserRole(),
+                    NotificationType.ORDER_APPROVED,
+                    "Nalog odobren",
+                    "Vaš nalog za " + saved.getListing().getTicker() + " je odobren i biće izvršen.",
+                    "ORDER",
+                    saved.getId()
+            );
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(OrderServiceImpl.class)
+                    .warn("Failed to send order approved notification: {}", e.getMessage());
+        }
+
         return toDtoWithUserName(saved);
     }
 
@@ -500,6 +539,22 @@ public class OrderServiceImpl implements OrderService {
         order.setLastModification(LocalDateTime.now());
 
         Order saved = orderRepository.save(order);
+
+        try {
+            notificationService.notify(
+                    saved.getUserId(),
+                    saved.getUserRole(),
+                    NotificationType.ORDER_DECLINED,
+                    "Nalog odbijen",
+                    "Vaš nalog za " + (saved.getListing() != null ? saved.getListing().getTicker() : "") + " je odbijen.",
+                    "ORDER",
+                    saved.getId()
+            );
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(OrderServiceImpl.class)
+                    .warn("Failed to send order declined notification: {}", e.getMessage());
+        }
+
         return toDtoWithUserName(saved);
     }
 
@@ -610,18 +665,44 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public Page<OrderDto> getMyOrders(int page, int size) {
+    public Page<OrderDto> getMyOrders(int page, int size, String status, LocalDate dateFrom, LocalDate dateTo, String listingType) {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
 
+        Long userId;
         Optional<Client> clientOpt = clientRepository.findByEmail(email);
         if (clientOpt.isPresent()) {
-            return orderRepository.findByUserId(clientOpt.get().getId(), pageable).map(this::toDtoWithUserName);
+            userId = clientOpt.get().getId();
+        } else {
+            Employee employee = employeeRepository.findByEmail(email)
+                    .orElseThrow(() -> new EntityNotFoundException("User not found"));
+            userId = employee.getId();
         }
 
-        Employee employee = employeeRepository.findByEmail(email)
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
-        return orderRepository.findByUserId(employee.getId(), pageable).map(this::toDtoWithUserName);
+        OrderStatus parsedStatus = null;
+        if (status != null && !status.isBlank() && !"ALL".equalsIgnoreCase(status)) {
+            try {
+                parsedStatus = OrderStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        ListingType parsedListingType = null;
+        if (listingType != null && !listingType.isBlank()) {
+            try {
+                parsedListingType = ListingType.valueOf(listingType.toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        Specification<Order> spec = Specification
+                .where(OrderSpecification.hasUserId(userId))
+                .and(OrderSpecification.hasStatus(parsedStatus))
+                .and(OrderSpecification.createdAfter(dateFrom))
+                .and(OrderSpecification.createdBefore(dateTo))
+                .and(OrderSpecification.hasListingType(parsedListingType));
+
+        return orderRepository.findAll(spec, pageable).map(this::toDtoWithUserName);
     }
     @Override
     public OrderDto getOrderById(Long orderId) {
