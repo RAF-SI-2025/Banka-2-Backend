@@ -50,6 +50,8 @@ import rs.raf.banka2_bek.notification.model.NotificationType;
 import rs.raf.banka2_bek.notification.service.NotificationService;
 import org.springframework.data.jpa.domain.Specification;
 import rs.raf.banka2_bek.order.repository.OrderSpecification;
+import rs.raf.banka2_bek.audit.model.AuditActionType;
+import rs.raf.banka2_bek.audit.service.AuditLogService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -57,7 +59,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-// TODO [B4 + B7 - Notifikacije + audit | Nosioci: Petar Poznanovic, Stasa Draskovic]
+// TODO [B4 + B7 - Notifikacije + audit | Nosioci: Petar Poznanovic, Stasa Dragovic]
 //
 // [B4 - Okidaci notifikacija | Petar Poznanovic]
 // Na sledecim lifecycle dogadjajima ordera pozvati notifikacioni servis:
@@ -72,7 +74,7 @@ import java.util.Optional;
 //   4. Order automatski otkazan (status DECLINED, cleanup scheduler) ->
 //        notifikacioniServis.posaljiOrderOtkazanNotifikaciju(order, razlog);
 //
-// [B7 - Audit hook | Stasa Draskovic]
+// [B7 - Audit hook | Stasa Dragovic]
 // Pri odobravanju i odbijanju ordera od strane supervizora evidentirati akciju
 // u audit log. Videti takodje OrderController.
 //   - approveOrder() -> posle order.setStatus(APPROVED) i save:
@@ -100,6 +102,7 @@ public class OrderServiceImpl implements OrderService {
     private final PortfolioRepository portfolioRepository;
     private final InvestmentFundRepository investmentFundRepository;
     private final NotificationService notificationService;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -477,6 +480,7 @@ public class OrderServiceImpl implements OrderService {
             });
         }
 
+        // B4 (Petar) — notifikacija vlasnika ordera o odobrenju
         try {
             notificationService.notify(
                     saved.getUserId(),
@@ -491,6 +495,13 @@ public class OrderServiceImpl implements OrderService {
             org.slf4j.LoggerFactory.getLogger(OrderServiceImpl.class)
                     .warn("Failed to send order approved notification: {}", e.getMessage());
         }
+
+        // B7 (Stasa) — audit zapis supervizorove approve akcije
+        auditLogService.record(
+                resolveCurrentUser().userId(), "EMPLOYEE",
+                AuditActionType.ORDER_APPROVED,
+                "Order approved: " + saved.getId(),
+                "ORDER", saved.getId());
 
         return toDtoWithUserName(saved);
     }
@@ -642,6 +653,13 @@ public class OrderServiceImpl implements OrderService {
         order.setLastModification(LocalDateTime.now());
         order.setApprovedBy(getSupervisorName()); // audit trail ko je skratio order
         Order saved = orderRepository.save(order);
+
+        auditLogService.record(
+                resolveCurrentUser().userId(), "EMPLOYEE",
+                AuditActionType.ORDER_DECLINED,
+                "Order declined: " + saved.getId(),
+                "ORDER", saved.getId());
+
         return toDtoWithUserName(saved);
     }
 

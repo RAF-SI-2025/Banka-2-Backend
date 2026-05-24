@@ -2,8 +2,10 @@ package rs.raf.banka2_bek.audit.dto;
 
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 // ============================================================
-// TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+// TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
 //
 // DTO koji se vraca klijentu (ADMIN/SUPERVISOR) pri pregledu audit log-a.
 // Nema osetljivih internih polja (nema raw DB id-eva entiteta koji nemaju smisla van konteksta).
@@ -35,5 +37,18 @@ import lombok.*;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class AuditLogDto {
+    private Long id;
+    private Long actorId;
+    private String actorType;
+    private String actorName;
+    private String actionType;
+    private String description;
+    private String targetType;
+    private Long targetId;
+    private String oldValue;
+    private String newValue;
+    private LocalDateTime createdAt;
 }

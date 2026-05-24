@@ -93,6 +93,9 @@ class OrderServiceImplCoverageTest {
     @Mock private BankTradingAccountResolver bankTradingAccountResolver;
     @Mock private CurrencyConversionService currencyConversionService;
     @Mock private PortfolioRepository portfolioRepository;
+    @Mock private rs.raf.banka2_bek.investmentfund.repository.InvestmentFundRepository investmentFundRepository;
+    @Mock private rs.raf.banka2_bek.notification.service.NotificationService notificationService;
+    @Mock private rs.raf.banka2_bek.audit.service.AuditLogService auditLogService;
 
     @InjectMocks
     private OrderServiceImpl orderService;

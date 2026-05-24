@@ -16,6 +16,8 @@ import rs.raf.banka2_bek.employee.model.Employee;
 import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 import rs.raf.banka2_bek.employee.service.EmployeeService;
 import rs.raf.banka2_bek.investmentfund.service.InvestmentFundService;
+import rs.raf.banka2_bek.audit.model.AuditActionType;
+import rs.raf.banka2_bek.audit.service.AuditLogService;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -29,7 +31,7 @@ import java.util.UUID;
  * Authors: Aleksa Vucinic (avucinic6020rn@raf.rs), Petar Poznanovic (ppoznanovic4917rn@raf.rs)
  */
 /*
- * TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+ * TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
  *
  * Pri izmeni permisija zaposlenom (updateEmployee kada se menjaju polja
  * permissions / role / isActive) evidentirati akciju u audit servis:
@@ -52,6 +54,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
     private final InvestmentFundService investmentFundService;
+    private final AuditLogService auditLogService;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -171,6 +174,15 @@ public class EmployeeServiceImpl implements EmployeeService {
                 investmentFundService.reassignFundManager(id, newManagerId);
             }
             employee.setPermissions(request.getPermissions());
+            Long actorId = resolveCurrentAdminId(id);
+            auditLogService.record(
+                    actorId, "EMPLOYEE",
+                    AuditActionType.PERMISSIONS_CHANGED,
+                    "Permissions updated for employee " + id,
+                    "EMPLOYEE", id,
+                    null,
+                    String.valueOf(employee.getPermissions())
+            );
         }
 
         employeeRepository.save(employee);

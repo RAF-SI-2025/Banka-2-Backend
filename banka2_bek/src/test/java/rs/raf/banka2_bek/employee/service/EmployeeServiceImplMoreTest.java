@@ -43,6 +43,8 @@ class EmployeeServiceImplMoreTest {
     private PasswordEncoder passwordEncoder;
     @Mock
     private ApplicationEventPublisher eventPublisher;
+    @Mock
+    private rs.raf.banka2_bek.audit.service.AuditLogService auditLogService;
 
     @InjectMocks
     private EmployeeServiceImpl employeeService;
