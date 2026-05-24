@@ -64,7 +64,8 @@ public enum NotificationType {
     ACCOUNT_LOCKED(true),
 
     // [B5 — Aleksa] TODO: PRICE_ALERT(false)
-    // [B8 — Nikola Djurovic] TODO: RECURRING_ORDER_SKIPPED(false)
+    // [B8 — Nikola Djurovic] Recurring order events
+    RECURRING_ORDER_SKIPPED(false),
 
     // [B1] Fallback type for ad-hoc notifications
     GENERAL(false);

@@ -10,12 +10,12 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // JPA entitet koji predstavlja jedan trajni nalog (DCA nalog).
 // Tabla u bazi: `recurring_orders`.
 //
-// IMPLEMENTIRATI — dodati sva polja (nakon `id`):
+// IMPLEMENTIRANO — dodata sva polja (nakon `id`):
 //   - ownerId      Long,   @Column(nullable=false)
 //                          vlasnik naloga (klijent ili aktuar)
 //   - ownerType    String, @Column(nullable=false, length=16)
@@ -58,4 +58,44 @@ public class RecurringOrder {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
+    private Long ownerId;
+
+    @Column(nullable = false, length = 16)
+    private String ownerType;
+
+    @Column(nullable = false)
+    private Long listingId;
+
+    @Column(nullable = false, length = 4)
+    private String direction;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private RecurringMode mode;
+
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal value;
+
+    @Column(nullable = false)
+    private Long accountId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 8)
+    private RecurringCadence cadence;
+
+    @Column(nullable = false)
+    private LocalDateTime nextRun;
+
+    @ColumnDefault("1")
+    @Column(nullable = false)
+    private boolean active = true;
+
+    @CreationTimestamp
+    @Column(nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 }

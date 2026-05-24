@@ -1,12 +1,12 @@
 package rs.raf.banka2_bek.recurringorder.model;
 
 // ============================================================
-// TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
+// [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic] - DONE
 //
 // Enum nacina definisanja iznosa trajnog naloga.
 //
-// IMPLEMENTIRATI:
-//   - Koristiti ovu vrednost u RecurringOrderService.executeOne() da se
+// IMPLEMENTIRANO:
+//   - Koristitimo ovu vrednost u RecurringOrderService.executeOne() da se
 //     odredi sta `value` polje entiteta predstavlja:
 //       BY_QUANTITY -> `value` je kolicina hartija (npr. 5 akcija)
 //       BY_AMOUNT   -> `value` je novcani iznos u valuti racuna (npr. 100 EUR);

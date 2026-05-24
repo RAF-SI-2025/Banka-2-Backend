@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
 // [B5 — Aleksa] When adding PRICE_ALERT notifications, pass referenceType="PRICE_ALERT",
 // referenceId=alertId so the frontend can open the alert detail.
 //
-// [B8 — Nikola Djurovic] When adding RECURRING_ORDER_SKIPPED notifications, pass
+// [B8 — Nikola Djurovic - DONE] When adding RECURRING_ORDER_SKIPPED notifications, pass
 // referenceType="RECURRING_ORDER", referenceId=recurringOrderId.
 
 @Entity

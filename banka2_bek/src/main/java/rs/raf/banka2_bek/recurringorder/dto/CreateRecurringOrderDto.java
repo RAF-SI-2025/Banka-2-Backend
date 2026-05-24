@@ -1,5 +1,15 @@
 package rs.raf.banka2_bek.recurringorder.dto;
 
+import jakarta.validation.constraints.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import rs.raf.banka2_bek.recurringorder.model.RecurringCadence;
+import rs.raf.banka2_bek.recurringorder.model.RecurringMode;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 // ============================================================
 // TODO [B8 - Trajni nalozi (DCA / RecurringOrder) | Nosilac: Nikola Djurovic]
 //
@@ -30,5 +40,30 @@ package rs.raf.banka2_bek.recurringorder.dto;
 // Konvencija: pratiti paket `savings` kao sablon.
 // Spec: Zadaci_Backend.pdf, zadatak B8.
 // ============================================================
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class CreateRecurringOrderDto {
+
+    @NotNull(message = "Listing ID je obavezan")
+    private Long listingId;
+
+    @NotBlank(message = "Smer je obavezan")
+    @Pattern(regexp = "BUY|SELL", message = "Smer mora biti BUY ili SELL")
+    private String direction;
+
+    @NotNull(message = "Nacin definisanja iznosa je obavezan")
+    private RecurringMode mode;
+
+    @NotNull(message = "Vrednost je obavezna")
+    @DecimalMin(value = "0.0001", message = "Vrednost mora biti veca od 0")
+    private BigDecimal value;
+
+    @NotNull(message = "Racun je obavezan")
+    private Long accountId;
+
+    @NotNull(message = "Ucestalost izvrsavanja je obavezna")
+    private RecurringCadence cadence;
+
+    private LocalDateTime firstRun;
 }
