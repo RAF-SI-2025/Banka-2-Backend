@@ -23,11 +23,16 @@ package rs.raf.banka2_bek.watchlist.dto;
 // Spec: Zadaci_Backend.pdf, zadatak B6.
 // ============================================================
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
 // Napomena: skeleton je prazan pa nosi samo @NoArgsConstructor. Pri dodavanju
 // polja vratiti @AllArgsConstructor i @Builder (videti Lombok napomenu u TODO-u).
 @Getter @Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class CreateWatchlistDto {
+    @NotBlank(message = "Watchlist name cannot be blank.")
+    private String name;
 }

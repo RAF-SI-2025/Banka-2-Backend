@@ -25,11 +25,34 @@ package rs.raf.banka2_bek.watchlist.dto;
 // Spec: Zadaci_Backend.pdf, zadatak B6.
 // ============================================================
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-// Napomena: skeleton je prazan pa nosi samo @NoArgsConstructor. Pri dodavanju
-// polja vratiti @AllArgsConstructor i @Builder (videti Lombok napomenu u TODO-u).
-@Getter @Setter
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class WatchlistItemDto {
+
+    private Long id;
+    private Long watchlistId;
+    private Long listingId;
+
+    private String ticker;
+    private String listingName;
+    private String securityType;
+    private String exchangeName;
+
+    private BigDecimal currentPrice;
+    private BigDecimal dailyChange;
+    private Long volume;
+
+    private LocalDateTime addedAt;
 }
