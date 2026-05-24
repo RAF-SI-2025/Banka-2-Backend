@@ -13,5 +13,14 @@ public interface ClientFundTransactionRepository extends JpaRepository<ClientFun
     List<ClientFundTransaction> findByUserIdAndUserRoleOrderByCreatedAtDesc(Long userId, String userRole);
 
     List<ClientFundTransaction> findByStatus(ClientFundTransactionStatus status);
-    List<ClientFundTransaction> findByUserIdAndStatusOrderByCreatedAtAsc(Long userId, ClientFundTransactionStatus status);
+
+    List<ClientFundTransaction> findByFundIdAndStatusOrderByCreatedAtAsc(
+            Long fundId,
+            ClientFundTransactionStatus status
+    );
+
+    List<ClientFundTransaction> findByUserIdAndStatusOrderByCreatedAtAsc(
+            Long userId,
+            ClientFundTransactionStatus status
+    );
 }

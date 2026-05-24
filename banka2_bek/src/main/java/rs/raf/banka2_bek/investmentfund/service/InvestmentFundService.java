@@ -44,19 +44,6 @@ import java.util.stream.Stream;
 /*
  * TODO [B11 + B12 - Dividende u fondovima + statistika | Nosioci: Brasanac, Milica Zoranovic]
  *
- * [B11] Integrisati priliv dividendi u fond, reinvestiranje i raspodelu klijentima:
- *   - Kada DividendScheduler isplati dividendu za akciju koja je u portfelju fonda,
- *     pozvati FundDividendService koji:
- *       1. dodaje dividendni prihod na cash (balance) fonda
- *       2. po konfiguraciji fonda (reinvest=true) odmah kupuje dodatne akcije istog listinga
- *          (BUY order sa fundId u ime fonda) — ovo je B11 reinvestiranje
- *       3. rasporedjuje neto dividendu (posle eventualnog reinvestiranja) srazmerno
- *          udelima klijenata (ClientFundPosition.units / totalUnits) i biljezi
- *          ClientFundTransaction tipa DIVIDEND_PAYOUT
- *   - Integraciona tacka: u invest() i withdraw() azurirati snapshot vrednosti fonda
- *     posle promena (snapshotFundIfMissing vec postoji — primeniti i ovde).
- *   - Klasa nosioc: FundDividendService (vec postoji u ovom paketu).
- *
  * [B12] Izloziti metrike fonda u podacima koje vraca getById / listDiscovery:
  *   - Pozvati FundStatisticsService.computeStatistics(fund) i ukljuciti rezultat
  *     u FundDetailDto (dodati polja: sharpeRatio, volatility30d, maxDrawdown,
