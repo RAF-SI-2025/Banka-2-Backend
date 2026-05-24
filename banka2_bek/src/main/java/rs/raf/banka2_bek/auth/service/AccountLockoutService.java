@@ -1,183 +1,267 @@
 package rs.raf.banka2_bek.auth.service;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import rs.raf.banka2_bek.auth.model.User;
+import rs.raf.banka2_bek.auth.repository.UserRepository;
+import rs.raf.banka2_bek.employee.model.Employee;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
+import rs.raf.banka2_bek.notification.service.MailSenderService;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Optional;
 
 /**
- * Opciono.2 — Account lockout posle X neuspesnih login pokusaja.
- *
- * Spec Celina 1, Scenario 5: "Posle 4 neuspeha, peti unos pogresne lozinke
- * → sistem zaključava nalog na određeni vremenski period". Spec eksplicitno
- * navodi ovo kao "Za nadogradnju" — opciono.
- *
- * Razlikuje se od {@link rs.raf.banka2_bek.auth.config.AuthRateLimitFilter}:
- *   * RateLimitFilter limitira po IP-u (10 req/min) — sprecava brute force.
- *   * AccountLockout limitira po EMAIL-u (5 failed → 15min lock) —
- *     sprecava credential stuffing kad napadac probava razne IP-e.
- *
- * In-memory implementacija (Caffeine), ne preziva restart. Za production
- * deploy zahteva Redis ili sl. shared store da bi radio kroz multiple
- * instance. Za KT3 demo dovoljno.
+ * Account lockout posle X neuspesnih login pokusaja — stanje se cuva u bazi
+ * na entitetima {@link User} i {@link Employee}.
  */
 @Slf4j
 @Service
 public class AccountLockoutService {
 
-    /*
-     * // TODO [B2 - Validacija + brute-force | Nosilac: Andjela Vilcek]
-     *
-     * Preraditi servis sa in-memory (Caffeine) na DB-bazirano stanje
-     * koristeci nova polja entiteta User.failedLoginAttempts i
-     * User.accountLockedUntil (analogno za Employee):
-     *
-     * 1. BRISANJE Caffeine cache-a:
-     *    - Ukloniti polja failedAttempts: Cache<String, AtomicInteger> i
-     *      lockedUntil: Cache<String, Instant>.
-     *    - Ukloniti @PostConstruct init() metodu.
-     *    - Ukloniti @Value lockout property-je (ili ostaviti za timeout
-     *      konfiguraciju, po izboru).
-     *
-     * 2. assertNotLocked(email):
-     *    - Ucitati User ili Employee po email-u iz repozitorijuma.
-     *    - Proveriti accountLockedUntil != null &&
-     *      accountLockedUntil.isAfter(LocalDateTime.now()).
-     *    - Ako je lock aktivan, baciti AccountLockedException sa preostalim
-     *      vremenom kao i sada.
-     *
-     * 3. recordFailure(email) — posle 5 uzastopnih neuspesnih pokusaja:
-     *    - Uvecati failedLoginAttempts u bazi (UserRepository.save /
-     *      EmployeeRepository.save).
-     *    - Kad failedLoginAttempts >= maxFailedAttempts, postaviti
-     *      accountLockedUntil = LocalDateTime.now().plusMinutes(10).
-     *    - Poslati email korisniku o zakljucavanju (koristiti postojeci
-     *      MailSenderService ili ApplicationEventPublisher).
-     *    - Baciti AccountLockedException odmah (kao i sada).
-     *
-     * 4. recordSuccess(email):
-     *    - Nulirati failedLoginAttempts = 0.
-     *    - Postaviti accountLockedUntil = null (otkljucati nalog).
-     *    - Sacuvati u bazi.
-     *
-     * 5. resetPassword tok u AuthService:
-     *    - Posle uspesne promene lozinke, takodje pozvati recordSuccess(email)
-     *      da se otkljuca nalog i nulira brojac.
-     *
-     * VAZNO: metoda mora biti @Transactional jer radi write nad entitetima.
-     * Paziti na lazyno ucitavanje entiteta — koristiti explicit fetch ili
-     * @Transactional(readOnly = false) u pozivajucem servisu.
-     */
-
-    /** Posle ovoliko neuspeha — racun je lock-ovan. */
     @Value("${auth.lockout.max-failed-attempts:5}")
     private int maxFailedAttempts;
 
-    /** Trajanje lock-a u minutama. */
-    @Value("${auth.lockout.lock-duration-minutes:15}")
+    @Value("${auth.lockout.lock-duration-minutes:10}")
     private int lockDurationMinutes;
 
-    /** Window u kome se broje neuspesi (resetuje se posle uspesnog login-a). */
-    @Value("${auth.lockout.attempt-window-minutes:30}")
-    private int attemptWindowMinutes;
+    private final UserRepository userRepository;
+    private final EmployeeRepository employeeRepository;
+    private final MailSenderService mailSenderService;
 
-    private Cache<String, AtomicInteger> failedAttempts;
-    private Cache<String, Instant> lockedUntil;
-
-    @PostConstruct
-    public void init() {
-        this.failedAttempts = Caffeine.newBuilder()
-                .expireAfterWrite(Duration.ofMinutes(attemptWindowMinutes))
-                .maximumSize(50_000)
-                .build();
-        this.lockedUntil = Caffeine.newBuilder()
-                .expireAfterWrite(Duration.ofMinutes(lockDurationMinutes))
-                .maximumSize(50_000)
-                .build();
+    public AccountLockoutService(UserRepository userRepository,
+                                 EmployeeRepository employeeRepository,
+                                 MailSenderService mailSenderService) {
+        this.userRepository = userRepository;
+        this.employeeRepository = employeeRepository;
+        this.mailSenderService = mailSenderService;
     }
 
     /**
      * Baca {@link AccountLockedException} ako je email trenutno lock-ovan.
      * Treba pozvati pre nego sto se proveri lozinka.
-     *
-     * Poruka je na srpskom (Bug T1-017 — pre fix-a poruka je bila pomesana
-     * SR/EN sto je FE prosledjivao 1:1 korisniku).
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void assertNotLocked(String email) {
         if (email == null) return;
-        String key = normalize(email);
-        Instant locked = lockedUntil.getIfPresent(key);
-        if (locked != null && locked.isAfter(Instant.now())) {
-            long secondsRemaining = locked.getEpochSecond() - Instant.now().getEpochSecond();
+        LockableAccount account = findAccount(email).orElse(null);
+        if (account == null) return;
+
+        if (isLockActive(account.getLockedUntil())) {
+            long secondsRemaining = secondsUntil(account.getLockedUntil());
             throw new AccountLockedException(formatLockoutMessage(secondsRemaining), secondsRemaining);
+        }
+
+        if (account.getLockedUntil() != null) {
+            account.clearLockExpiry();
+            account.save();
         }
     }
 
     /**
      * Belezi neuspesan pokusaj i lockuje racun ako je dosegnut prag.
-     *
-     * Spec Sc 5 (Bug T1-015): "posle 4 neuspeha, 5. pokusaj zakljucava nalog".
-     * Stari kod je samo postavljao lock na 5. pokusaju ali vracao genericku
-     * gresku "Invalid email or password" — korisnik je dobijao lockout alert
-     * tek na 6. pokusaju kad je {@code assertNotLocked} pucao. Sad bacamo
-     * {@link AccountLockedException} odmah kad pretreknemo prag, tako da
-     * korisnik vidi lockout poruku na samom 5. pokusaju.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, noRollbackFor = AccountLockedException.class)
     public void recordFailure(String email) {
         if (email == null) return;
-        String key = normalize(email);
-        AtomicInteger count = failedAttempts.get(key, k -> new AtomicInteger(0));
-        int attempts = count.incrementAndGet();
-        if (attempts >= maxFailedAttempts) {
-            Instant lockUntil = Instant.now().plus(Duration.ofMinutes(lockDurationMinutes));
-            lockedUntil.put(key, lockUntil);
-            failedAttempts.invalidate(key);
-            log.warn("Account locked: {} ({} failed attempts)", key, attempts);
-            long secondsRemaining = lockUntil.getEpochSecond() - Instant.now().getEpochSecond();
+        LockableAccount account = findAccount(email).orElse(null);
+        if (account == null) return;
+
+        if (isLockActive(account.getLockedUntil())) {
+            long secondsRemaining = secondsUntil(account.getLockedUntil());
             throw new AccountLockedException(formatLockoutMessage(secondsRemaining), secondsRemaining);
         }
+
+        int attempts = account.getFailedAttempts() + 1;
+        account.setFailedAttempts(attempts);
+
+        if (attempts >= maxFailedAttempts) {
+            LocalDateTime lockUntil = LocalDateTime.now().plusMinutes(lockDurationMinutes);
+            account.setLockedUntil(lockUntil);
+            account.save();
+            log.warn("Account locked: {} ({} failed attempts)", normalize(email), attempts);
+            try {
+                mailSenderService.sendAccountLockedMail(account.getEmail(), lockDurationMinutes);
+            } catch (Exception e) {
+                log.error("Failed to send account locked email to {}", account.getEmail(), e);
+            }
+            long secondsRemaining = secondsUntil(lockUntil);
+            throw new AccountLockedException(formatLockoutMessage(secondsRemaining), secondsRemaining);
+        }
+
+        account.save();
+    }
+
+    /**
+     * Resetuje brojac i otkljucava nalog (po uspesnom login-u ili resetu lozinke).
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordSuccess(String email) {
+        if (email == null) return;
+        LockableAccount account = findAccount(email).orElse(null);
+        if (account == null) return;
+
+        account.setFailedAttempts(0);
+        account.setLockedUntil(null);
+        account.save();
+    }
+
+    /** Vraca trenutni broj neuspesnih pokusaja; 0 ako nalog ne postoji. */
+    @Transactional(readOnly = true)
+    public int getFailureCount(String email) {
+        if (email == null) return 0;
+        return findAccount(email)
+                .map(LockableAccount::getFailedAttempts)
+                .orElse(0);
+    }
+
+    /** Vraca true ako je email trenutno lock-ovan. */
+    @Transactional(readOnly = true)
+    public boolean isLocked(String email) {
+        if (email == null) return false;
+        return findAccount(email)
+                .map(a -> isLockActive(a.getLockedUntil()))
+                .orElse(false);
+    }
+
+    private Optional<LockableAccount> findAccount(String email) {
+        String normalized = normalize(email);
+        Optional<Employee> employee = employeeRepository.findByEmail(normalized);
+        if (employee.isEmpty()) {
+            employee = employeeRepository.findByEmail(email.trim());
+        }
+        if (employee.isPresent()) {
+            return Optional.of(new EmployeeLockable(employee.get(), employeeRepository));
+        }
+
+        Optional<User> user = userRepository.findByEmail(normalized);
+        if (user.isEmpty()) {
+            user = userRepository.findByEmail(email.trim());
+        }
+        return user.map(u -> new UserLockable(u, userRepository));
+    }
+
+    private boolean isLockActive(LocalDateTime lockedUntil) {
+        return lockedUntil != null && lockedUntil.isAfter(LocalDateTime.now());
+    }
+
+    private long secondsUntil(LocalDateTime lockedUntil) {
+        return Duration.between(LocalDateTime.now(), lockedUntil).getSeconds();
     }
 
     private String formatLockoutMessage(long secondsRemaining) {
-        long minutes = Math.max(1, secondsRemaining / 60 + 1);
+        long minutes = Math.max(1, secondsRemaining / 60 + (secondsRemaining % 60 > 0 ? 1 : 0));
         return "Nalog je privremeno zakljucan zbog previse neuspesnih pokusaja. "
                 + "Pokusajte ponovo za " + minutes + " min.";
     }
 
-    /**
-     * Resetuje brojac (po uspesnom login-u).
-     */
-    public void recordSuccess(String email) {
-        if (email == null) return;
-        String key = normalize(email);
-        failedAttempts.invalidate(key);
-        // Lock se zadrzava ako je vec aktivan — ne unlock-ujemo eksplicitno;
-        // korisnik ce moci tek posle isteka.
-    }
-
-    /** Vraca trenutni broj neuspesa za email; 0 ako nema upisa. */
-    public int getFailureCount(String email) {
-        if (email == null) return 0;
-        AtomicInteger count = failedAttempts.getIfPresent(normalize(email));
-        return count != null ? count.get() : 0;
-    }
-
-    /** Vraca true ako je email trenutno lock-ovan. */
-    public boolean isLocked(String email) {
-        if (email == null) return false;
-        Instant locked = lockedUntil.getIfPresent(normalize(email));
-        return locked != null && locked.isAfter(Instant.now());
-    }
-
     private String normalize(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private interface LockableAccount {
+        String getEmail();
+        int getFailedAttempts();
+        void setFailedAttempts(int attempts);
+        LocalDateTime getLockedUntil();
+        void setLockedUntil(LocalDateTime until);
+        void clearLockExpiry();
+        void save();
+    }
+
+    private static final class UserLockable implements LockableAccount {
+        private final User user;
+        private final UserRepository repository;
+
+        UserLockable(User user, UserRepository repository) {
+            this.user = user;
+            this.repository = repository;
+        }
+
+        @Override
+        public String getEmail() {
+            return user.getEmail();
+        }
+
+        @Override
+        public int getFailedAttempts() {
+            return user.getFailedLoginAttempts() != null ? user.getFailedLoginAttempts() : 0;
+        }
+
+        @Override
+        public void setFailedAttempts(int attempts) {
+            user.setFailedLoginAttempts(attempts);
+        }
+
+        @Override
+        public LocalDateTime getLockedUntil() {
+            return user.getAccountLockedUntil();
+        }
+
+        @Override
+        public void setLockedUntil(LocalDateTime until) {
+            user.setAccountLockedUntil(until);
+        }
+
+        @Override
+        public void clearLockExpiry() {
+            user.setAccountLockedUntil(null);
+        }
+
+        @Override
+        public void save() {
+            repository.save(user);
+        }
+    }
+
+    private static final class EmployeeLockable implements LockableAccount {
+        private final Employee employee;
+        private final EmployeeRepository repository;
+
+        EmployeeLockable(Employee employee, EmployeeRepository repository) {
+            this.employee = employee;
+            this.repository = repository;
+        }
+
+        @Override
+        public String getEmail() {
+            return employee.getEmail();
+        }
+
+        @Override
+        public int getFailedAttempts() {
+            return employee.getFailedLoginAttempts() != null ? employee.getFailedLoginAttempts() : 0;
+        }
+
+        @Override
+        public void setFailedAttempts(int attempts) {
+            employee.setFailedLoginAttempts(attempts);
+        }
+
+        @Override
+        public LocalDateTime getLockedUntil() {
+            return employee.getAccountLockedUntil();
+        }
+
+        @Override
+        public void setLockedUntil(LocalDateTime until) {
+            employee.setAccountLockedUntil(until);
+        }
+
+        @Override
+        public void clearLockExpiry() {
+            employee.setAccountLockedUntil(null);
+        }
+
+        @Override
+        public void save() {
+            repository.save(employee);
+        }
     }
 
     /**

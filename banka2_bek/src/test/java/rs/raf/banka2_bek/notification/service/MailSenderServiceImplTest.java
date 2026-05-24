@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mail.javamail.JavaMailSender;
 import rs.raf.banka2_bek.notification.template.AccountCreatedConfirmationEmailTemplate;
+import rs.raf.banka2_bek.notification.template.AccountLockedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationConfirmedEmailTemplate;
 import rs.raf.banka2_bek.notification.template.ActivationEmailTemplate;
 import rs.raf.banka2_bek.notification.template.OtpEmailTemplate;
@@ -18,6 +19,7 @@ import rs.raf.banka2_bek.notification.template.TransactionEmailTemplate;
 import java.util.Properties;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,6 +41,8 @@ class MailSenderServiceImplTest {
     private OtpEmailTemplate otpEmailTemplate;
     @Mock
     private TransactionEmailTemplate transactionEmailTemplate;
+    @Mock
+    private AccountLockedEmailTemplate accountLockedEmailTemplate;
 
     private MailSenderService service;
 
@@ -51,6 +55,7 @@ class MailSenderServiceImplTest {
         service = new MailSenderService(
                 mailSender,
                 passwordResetTemplate,
+                accountLockedEmailTemplate,
                 activationTemplate,
                 activationConfirmedTemplate,
                 accountCreatedConfirmationEmailTemplate,
@@ -62,6 +67,16 @@ class MailSenderServiceImplTest {
                 "http://localhost:3000",
                 "/activate-account"
         );
+    }
+
+    @Test
+    void sendAccountLockedMail_sends() {
+        when(accountLockedEmailTemplate.buildSubject()).thenReturn("Locked");
+        when(accountLockedEmailTemplate.buildBody(anyInt(), anyString())).thenReturn("<html/>");
+
+        service.sendAccountLockedMail("user@test.com", 10);
+
+        verify(mailSender).send(any(MimeMessage.class));
     }
 
     @Test

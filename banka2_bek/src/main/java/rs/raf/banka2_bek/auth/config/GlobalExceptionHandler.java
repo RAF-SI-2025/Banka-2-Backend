@@ -105,6 +105,9 @@ public class GlobalExceptionHandler {
             status = HttpStatus.NOT_FOUND;
         } else if (cause instanceof AccessDeniedException) {
             status = HttpStatus.FORBIDDEN;
+        } else if (cause instanceof AuthenticationFailedException
+                || cause instanceof AccountLockoutService.AccountLockedException) {
+            status = HttpStatus.UNAUTHORIZED;
         }
         return ResponseEntity.status(status).body(new MessageResponseDto(message));
     }

@@ -1,5 +1,6 @@
 package rs.raf.banka2_bek.auth.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -31,49 +32,11 @@ public class RegisterRequestDto {
     @Size(max = 50)
     private String username;
 
-    /*
-     * // TODO [B2 - Validacija + brute-force | Nosilac: Andjela Vilcek]
-     *
-     * Dodati Jakarta Validation anotacije na polja phone i dateOfBirth:
-     *
-     * 1. Telefon — validacija formata:
-     *    Trenutno: samo @Size(max = 20), nema provere da su cifre.
-     *    Trebalo bi dodati @Pattern ispod @Size:
-     *
-     *      @Pattern(
-     *          regexp = "^\\+?[0-9]{6,20}$",
-     *          message = "Telefon sme da sadrzi samo cifre uz opcioni vodeci znak +"
-     *      )
-     *
-     *    Regex objasnjenje:
-     *      ^\+?   — opcioni vodeci plus (medjunarodni format)
-     *      [0-9]+ — samo cifre
-     *      {6,20} — min 6 (kratki lokalni brojevi), max 20 (E.164 max je 15 + prefix)
-     *
-     * 2. Datum rodjenja — ne sme biti u buducnosti:
-     *    Trenutno: Long (Unix ms), nema validacije opsega.
-     *    Opcija A (preporucena za Long tip) — custom constraint ili
-     *    @AssertTrue metoda u samom DTO-u:
-     *
-     *      @AssertTrue(message = "Datum rodjenja ne sme biti u buducnosti")
-     *      public boolean isDateOfBirthValid() {
-     *          return dateOfBirth == null
-     *              || dateOfBirth <= java.time.Instant.now().toEpochMilli();
-     *      }
-     *
-     *    Opcija B — promeniti tip polja na LocalDate i koristiti @Past:
-     *
-     *      @Past(message = "Datum rodjenja mora biti u proslosti")
-     *      private LocalDate dateOfBirth;
-     *
-     *    Uz Opciju B potrebno je azurirati AuthService.register() koji
-     *    poziva user.setDateOfBirth(request.getDateOfBirth()) i ocekuje Long.
-     *
-     * 3. Osigurati da RegisterController (ili odgovarajuci @RestController)
-     *    ima @Valid/@Validated anotaciju na parametru requestBody,
-     *    inace ove anotacije nemaju efekta pri pozivu.
-     */
     @Size(max = 20)
+    @Pattern(
+            regexp = "^\\+?[0-9]{6,20}$",
+            message = "Telefon sme da sadrzi samo cifre uz opcioni vodeci znak +"
+    )
     private String phone;
 
     @Size(max = 255)
@@ -157,5 +120,11 @@ public class RegisterRequestDto {
 
     public void setGender(String gender) {
         this.gender = gender;
+    }
+
+    @AssertTrue(message = "Datum rodjenja ne sme biti u buducnosti")
+    public boolean isDateOfBirthValid() {
+        return dateOfBirth == null
+                || dateOfBirth <= java.time.Instant.now().toEpochMilli();
     }
 }
