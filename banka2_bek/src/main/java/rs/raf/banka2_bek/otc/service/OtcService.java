@@ -88,6 +88,8 @@ public class OtcService {
     private final AccountRepository accountRepository;
     private final CurrencyConversionService currencyConversionService;
     private final UserResolver userResolver;
+    // [B10 - Aja Timotic]: dodato za pozivanje recordEntry() iz counterOffer/accept/decline
+    private final OtcNegotiationHistoryService negotiationHistoryService;
     private final String bankRegistrationNumber;
 
     private final NotificationService notificationService;
@@ -99,6 +101,7 @@ public class OtcService {
                       AccountRepository accountRepository,
                       CurrencyConversionService currencyConversionService,
                       UserResolver userResolver,
+                      OtcNegotiationHistoryService negotiationHistoryService,
                       @Value("${bank.registration-number}") String bankRegistrationNumber,
                       NotificationService notificationService) {
         this.offerRepository = offerRepository;
@@ -108,6 +111,7 @@ public class OtcService {
         this.accountRepository = accountRepository;
         this.currencyConversionService = currencyConversionService;
         this.userResolver = userResolver;
+        this.negotiationHistoryService = negotiationHistoryService;
         this.bankRegistrationNumber = bankRegistrationNumber;
         this.notificationService = notificationService;
     }
@@ -255,6 +259,18 @@ public class OtcService {
 
         OtcOffer savedOffer = offerRepository.save(offer);
 
+        // B10 (Aja) — svaka kontraponuda ostavlja snimak u istoriji pregovora
+        negotiationHistoryService.recordEntry(
+                savedOffer.getId(),
+                savedOffer.getQuantity(),
+                savedOffer.getPricePerStock(),
+                savedOffer.getPremium(),
+                savedOffer.getSettlementDate(),
+                savedOffer.getStatus().name(),
+                me.userId(),
+                resolveUserName(me.userId(), me.userRole()));
+
+        // B4 (Petar) — notifikacija drugog ucesnika koji je sad na redu
         try {
             String otherRole = savedOffer.getWaitingOnUserId().equals(savedOffer.getBuyerId())
                     ? savedOffer.getBuyerRole() : savedOffer.getSellerRole();
@@ -284,6 +300,18 @@ public class OtcService {
         offer.setLastModifiedByName(resolveUserName(me.userId(), me.userRole()));
         OtcOffer savedOffer = offerRepository.save(offer);
 
+        // B10 (Aja) — snimi finalni DECLINED zapis kako bi istorija imala kraj
+        negotiationHistoryService.recordEntry(
+                savedOffer.getId(),
+                savedOffer.getQuantity(),
+                savedOffer.getPricePerStock(),
+                savedOffer.getPremium(),
+                savedOffer.getSettlementDate(),
+                savedOffer.getStatus().name(),
+                me.userId(),
+                resolveUserName(me.userId(), me.userRole()));
+
+        // B4 (Petar) — notifikacija drugog ucesnika o odbijanju
         try {
             Long otherPartyId = me.userId().equals(savedOffer.getBuyerId())
                     ? savedOffer.getSellerId() : savedOffer.getBuyerId();
@@ -392,6 +420,18 @@ public class OtcService {
         offer.setLastModifiedById(me.userId());
         offer.setLastModifiedByName(resolveUserName(me.userId(), me.userRole()));
         offerRepository.save(offer);
+
+        // B10 — snimi finalni ACCEPTED zapis u istoriji pregovora
+        negotiationHistoryService.recordEntry(
+                offer.getId(),
+                offer.getQuantity(),
+                offer.getPricePerStock(),
+                offer.getPremium(),
+                offer.getSettlementDate(),
+                offer.getStatus().name(),
+                me.userId(),
+                resolveUserName(me.userId(), me.userRole()));
+
 
         log.info("OTC offer #{} accepted by {} — contract #{} created", offer.getId(), me.userId(), contract.getId());
 

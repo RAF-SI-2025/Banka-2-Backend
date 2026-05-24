@@ -8,10 +8,11 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import rs.raf.banka2_bek.order.exception.InsufficientFundsException;
 import rs.raf.banka2_bek.otc.controller.OtcController;
+import rs.raf.banka2_bek.otc.controller.OtcNegotiationHistoryController;
 
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = OtcController.class)
+@RestControllerAdvice(assignableTypes = {OtcController.class, OtcNegotiationHistoryController.class})
 public class OtcExceptionHandler {
 
     @ExceptionHandler(EntityNotFoundException.class)
