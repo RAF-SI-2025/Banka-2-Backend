@@ -7,7 +7,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 // ============================================================
-// TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+// TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
 //
 // JPA entitet koji predstavlja jedan zapis u dnevniku revizije (audit log).
 // Svaka administrativna akcija cuva ko je izvrsio (actor), sta je uradjeno
@@ -47,6 +47,31 @@ public class AuditLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "actor_id", nullable = false)
+    private Long actorId;
+
+    @Column(name = "actor_type", nullable = false, length = 16)
+    private String actorType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "action_type", nullable = false, length = 32)
+    private AuditActionType actionType;
+
+    @Column(name = "description", nullable = false, length = 512)
+    private String description;
+
+    @Column(name = "target_type", length = 64)
+    private String targetType;
+
+    @Column(name = "target_id")
+    private Long targetId;
+
+    @Column(name = "old_value", columnDefinition = "TEXT")
+    private String oldValue;
+
+    @Column(name = "new_value", columnDefinition = "TEXT")
+    private String newValue;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

@@ -31,6 +31,10 @@ class TaxControllerTest {
     private MockMvc mockMvc;
     @Mock
     private TaxService taxService;
+    @Mock
+    private rs.raf.banka2_bek.audit.service.AuditLogService auditLogService;
+    @Mock
+    private rs.raf.banka2_bek.employee.repository.EmployeeRepository employeeRepository;
 
     @InjectMocks
     private TaxController taxController;

@@ -8,11 +8,14 @@ import org.springframework.web.bind.annotation.*;
 import rs.raf.banka2_bek.tax.dto.TaxBreakdownItemDto;
 import rs.raf.banka2_bek.tax.dto.TaxRecordDto;
 import rs.raf.banka2_bek.tax.service.TaxService;
+import rs.raf.banka2_bek.audit.model.AuditActionType;
+import rs.raf.banka2_bek.audit.service.AuditLogService;
+import rs.raf.banka2_bek.employee.repository.EmployeeRepository;
 
 import java.util.List;
 
 /*
- * TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+ * TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
  *
  * Pri rucnom pokretanju obracuna poreza (POST /tax/calculate, metoda
  * calculateTax()) evidentirati akciju u audit servis:
@@ -31,6 +34,8 @@ import java.util.List;
 public class TaxController {
 
     private final TaxService taxService;
+    private final AuditLogService auditLogService;
+    private final EmployeeRepository employeeRepository;
 
     /**
      * GET /tax - Lista korisnika sa dugovanjima (supervizor portal).
@@ -63,8 +68,20 @@ public class TaxController {
      */
     @PostMapping("/calculate")
     @PreAuthorize("hasAnyRole('ADMIN', 'EMPLOYEE')")
-    public ResponseEntity<Void> triggerCalculation() {
+    public ResponseEntity<Void> triggerCalculation(Authentication authentication) {
         taxService.calculateTaxForAllUsers();
+
+        String email = authentication != null ? authentication.getName() : "UNKNOWN";
+        Long actorId = employeeRepository.findByEmail(email)
+                .map(e -> e.getId())
+                .orElse(0L);
+        auditLogService.record(
+                actorId, "EMPLOYEE",
+                AuditActionType.TAX_RUN_TRIGGERED,
+                "Manual tax calculation triggered by " + email,
+                null, null
+        );
+
         return ResponseEntity.ok().build();
     }
 

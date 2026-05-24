@@ -1,7 +1,7 @@
 package rs.raf.banka2_bek.audit.model;
 
 // ============================================================
-// TODO [B7 - Audit log | Nosilac: Stasa Draskovic]
+// TODO [B7 - Audit log | Nosilac: Stasa Dragovic]
 //
 // Enum tipova administrativnih akcija koje se belezeZu audit log-u.
 //
